@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+console.log('✅ imagenes.js cargado correctamente');
 const Imagen = require('../models/imagen');
 const cloudinary = require('../utils/cloudinary.js');
 const multer = require('multer');
@@ -75,7 +76,7 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
     console.error('Error al subir imagen:', err);
     res.status(500).json({ mensaje: 'Error interno al subir imagen' });
   }
-  console.log('✅ imagenes.js cargado correctamente');
+  
 });
 
 module.exports = router;
