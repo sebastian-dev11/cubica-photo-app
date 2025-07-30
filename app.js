@@ -2,8 +2,10 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('./db');
 const authRoutes = require('./routes/auth');
+console.log('✅ authRoutes:', typeof authRoutes);
 const imagenRoutes = require('./routes/imagenes');
-const pdfRoutes = require('./routes/pdf');
+console.log('✅ imagenRoutes:', typeof imagenRoutes);
+const pdfRoutes = require('./routes/pdf');console.log('✅ pdfRoutes:', typeof pdfRoutes);
 
 const app = express();
 const cors = require('cors');
