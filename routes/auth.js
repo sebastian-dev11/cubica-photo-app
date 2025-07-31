@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const UsuarioUnico = require('../models/usuarioUnico');
+const UsuarioUnico = require('../models/UsuarioUnico');
 
 // 🟢 Ruta para login
 router.post('/login', async (req, res) => {
