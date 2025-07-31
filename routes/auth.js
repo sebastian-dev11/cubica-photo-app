@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const UsuarioUnico = require('../models/UsuarioUnico');
+console.log('Tipo de UsuarioUnico:', typeof UsuarioUnico); // debe ser 'function'
 
 // 🟢 Ruta para login
 router.post('/login', async (req, res) => {
