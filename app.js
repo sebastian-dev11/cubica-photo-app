@@ -15,6 +15,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/auth', authRoutes);
 app.use('/login', authRoutes);
+app.use('/crear', authRoutes);
 app.use('/imagenes', imagenRoutes);
 app.use('/pdf', pdfRoutes);
 
