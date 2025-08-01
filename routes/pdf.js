@@ -136,24 +136,33 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     // 🎨 Portada estilizada
     const fechaActual = new Date().toLocaleString('es-CO', {
-      dateStyle: 'full',
-      timeStyle: 'short'
-    });
+  dateStyle: 'full',
+  timeStyle: 'short'
+});
 
-    doc.fillColor('#003366')
-      .fontSize(30)
-      .text('📋 Informe Técnico', { align: 'center' });
+doc.fillColor('#007BFF').fontSize(26).text('Informe Técnico', {
+  align: 'center',
+  underline: false
+});
 
-    doc.moveDown();
-    doc.fontSize(18).fillColor('black').text(`Sesión: ${sesionId}`, { align: 'center' });
-    doc.fontSize(14).text(`Generado: ${fechaActual}`, { align: 'center' });
+doc.moveDown(2);
 
-    doc.moveDown(4);
-    doc.fontSize(12).fillColor('gray').text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', {
-      align: 'center'
-    });
+doc.fillColor('black')
+  .fontSize(16)
+  .text(`Sesión: ${sesionId}`, { align: 'center' });
 
-    doc.addPage();
+doc.moveDown(0.5);
+
+doc.fontSize(12).text(`Generado: ${fechaActual}`, { align: 'center' });
+
+doc.moveDown(2);
+
+doc.fontSize(10).fillColor('gray')
+  .text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', {
+    align: 'center'
+  });
+
+doc.addPage();
 
     // 🖼️ Agrupar imágenes por nombre
     const previas = imagenes.filter(img => img.tipo === 'previa');
