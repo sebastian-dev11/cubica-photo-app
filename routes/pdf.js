@@ -116,33 +116,95 @@ const axios = require('axios');
 const express = require('express');
 const router = express.Router();
 const PDFDocument = require('pdfkit');
+const Imagen = require('../models/imagen');
+const cloudinary = require('../utils/cloudinary'); // Asegúrate de tener esta utilidad bien configurada
 
-router.get('/prueba', async (req, res) => {
-  const url = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754012630/mi-app/b5wfrnlpow6ukrmcszzs.jpg';
+router.get('/generar/:sesionId', async (req, res) => {
+  const { sesionId } = req.params;
 
   try {
-    const response = await axios.get(url, { responseType: 'arraybuffer' });
-    const buffer = Buffer.from(response.data, 'binary');
+    const imagenes = await Imagen.find({ sesionId });
+
+    if (imagenes.length === 0) {
+      return res.status(404).send('No hay imágenes para esta sesión');
+    }
 
     const doc = new PDFDocument({ margin: 50 });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename=prueba_imagen.pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=informe_tecnico_${sesionId}.pdf`);
     doc.pipe(res);
 
-    doc.fontSize(20).text('Prueba de imagen desde Cloudinary', { align: 'center' });
-    doc.moveDown();
-
-    doc.image(buffer, {
-      fit: [300, 300],
-      align: 'center'
+    // 🏷️ Portada
+    const fechaActual = new Date().toLocaleString('es-CO', {
+      dateStyle: 'full',
+      timeStyle: 'short',
     });
 
+    doc.fontSize(26).text('Informe Técnico', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(16).text(`Sesión ID: ${sesionId}`, { align: 'center' });
+    doc.fontSize(14).text(`Fecha de generación: ${fechaActual}`, { align: 'center' });
+    doc.addPage();
+
+    // 🖼️ Agrupar imágenes por pares
+    const previas = imagenes.filter((img) => img.tipo === 'previa');
+    const posteriores = imagenes.filter((img) => img.tipo === 'posterior');
+
+    const pares = [];
+    previas.forEach((previa) => {
+      const posterior = posteriores.find(p => p.nombreOriginal === previa.nombreOriginal);
+      if (posterior) {
+        pares.push({ previa, posterior });
+      }
+    });
+
+    const imageWidth = 250;
+    const imageHeight = 180;
+    const gapX = 40;
+    const gapY = 40;
+    const startX = doc.page.margins.left;
+
+    for (let i = 0; i < pares.length; i++) {
+      const { previa, posterior } = pares[i];
+      const y = doc.y;
+
+      const previaResp = await axios.get(previa.url, { responseType: 'arraybuffer' });
+      const posteriorResp = await axios.get(posterior.url, { responseType: 'arraybuffer' });
+
+      const previaBuffer = Buffer.from(previaResp.data, 'binary');
+      const posteriorBuffer = Buffer.from(posteriorResp.data, 'binary');
+
+      doc.image(previaBuffer, startX, y, { fit: [imageWidth, imageHeight] });
+      doc.image(posteriorBuffer, startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
+
+      doc.fontSize(12).text('Foto previa a la instalación', startX, y + imageHeight + 5, {
+        width: imageWidth,
+        align: 'center'
+      });
+      doc.text('Foto posterior a la instalación', startX + imageWidth + gapX, y + imageHeight + 5, {
+        width: imageWidth,
+        align: 'center'
+      });
+
+      doc.addPage();
+    }
+
     doc.end();
+
+    // 🧹 Eliminar imágenes de Cloudinary y MongoDB
+    for (const img of imagenes) {
+      const publicId = img.url.split('/').slice(-1)[0].split('.')[0];
+      await cloudinary.uploader.destroy(`mi-app/${publicId}`);
+    }
+
+    await Imagen.deleteMany({ sesionId });
+    console.log(`🗑️ Imágenes eliminadas para sesión ${sesionId}`);
   } catch (err) {
-    console.error('❌ Error en prueba de imagen:', err);
-    res.status(500).send('Error al probar la imagen');
+    console.error('❌ Error al generar PDF:', err);
+    res.status(500).send('Error al generar el PDF');
   }
 });
 
 module.exports = router;
+
 
