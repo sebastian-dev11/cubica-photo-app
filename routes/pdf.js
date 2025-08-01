@@ -1,7 +1,14 @@
+const axios = require('axios');
 const express = require('express');
 const router = express.Router();
 const PDFDocument = require('pdfkit');
 const Imagen = require('../models/imagen');
+
+// 🔁 Función para obtener el buffer de una imagen desde una URL
+const obtenerBufferImagen = async (url) => {
+  const response = await axios.get(url, { responseType: 'arraybuffer' });
+  return Buffer.from(response.data, 'binary');
+};
 
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
@@ -57,8 +64,11 @@ router.get('/generar/:sesionId', async (req, res) => {
 
       // Primer par
       if (par1) {
-        doc.image(par1.previa.url, startX, y, { fit: [imageWidth, imageHeight] });
-        doc.image(par1.posterior.url, startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
+        const previaBuffer1 = await obtenerBufferImagen(par1.previa.url);
+        const posteriorBuffer1 = await obtenerBufferImagen(par1.posterior.url);
+
+        doc.image(previaBuffer1, startX, y, { fit: [imageWidth, imageHeight] });
+        doc.image(posteriorBuffer1, startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
 
         doc.fontSize(12).text('Foto previa a la instalación', startX, y + imageHeight + 5, {
           width: imageWidth,
@@ -74,8 +84,11 @@ router.get('/generar/:sesionId', async (req, res) => {
 
       // Segundo par
       if (par2) {
-        doc.image(par2.previa.url, startX, y, { fit: [imageWidth, imageHeight] });
-        doc.image(par2.posterior.url, startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
+        const previaBuffer2 = await obtenerBufferImagen(par2.previa.url);
+        const posteriorBuffer2 = await obtenerBufferImagen(par2.posterior.url);
+
+        doc.image(previaBuffer2, startX, y, { fit: [imageWidth, imageHeight] });
+        doc.image(posteriorBuffer2, startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
 
         doc.fontSize(12).text('Foto previa a la instalación', startX, y + imageHeight + 5, {
           width: imageWidth,
