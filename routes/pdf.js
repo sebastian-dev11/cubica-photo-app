@@ -117,7 +117,6 @@ const express = require('express');
 const router = express.Router();
 const PDFDocument = require('pdfkit');
 const Imagen = require('../models/imagen');
-const cloudinary = require('../utils/cloudinary'); // Asegúrate de tener esta utilidad bien configurada
 
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
@@ -137,7 +136,7 @@ router.get('/generar/:sesionId', async (req, res) => {
     // 🏷️ Portada
     const fechaActual = new Date().toLocaleString('es-CO', {
       dateStyle: 'full',
-      timeStyle: 'short',
+      timeStyle: 'short'
     });
 
     doc.fontSize(26).text('Informe Técnico', { align: 'center' });
@@ -146,12 +145,12 @@ router.get('/generar/:sesionId', async (req, res) => {
     doc.fontSize(14).text(`Fecha de generación: ${fechaActual}`, { align: 'center' });
     doc.addPage();
 
-    // 🖼️ Agrupar imágenes por pares
-    const previas = imagenes.filter((img) => img.tipo === 'previa');
-    const posteriores = imagenes.filter((img) => img.tipo === 'posterior');
+    // 🖼️ Agrupar imágenes por nombre
+    const previas = imagenes.filter(img => img.tipo === 'previa');
+    const posteriores = imagenes.filter(img => img.tipo === 'posterior');
 
     const pares = [];
-    previas.forEach((previa) => {
+    previas.forEach(previa => {
       const posterior = posteriores.find(p => p.nombreOriginal === previa.nombreOriginal);
       if (posterior) {
         pares.push({ previa, posterior });
@@ -166,16 +165,15 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     for (let i = 0; i < pares.length; i++) {
       const { previa, posterior } = pares[i];
-      const y = doc.y;
 
-      const previaResp = await axios.get(previa.url, { responseType: 'arraybuffer' });
-      const posteriorResp = await axios.get(posterior.url, { responseType: 'arraybuffer' });
+      // Descargar imágenes desde Cloudinary
+      const previaImg = await axios.get(previa.url, { responseType: 'arraybuffer' });
+      const posteriorImg = await axios.get(posterior.url, { responseType: 'arraybuffer' });
 
-      const previaBuffer = Buffer.from(previaResp.data, 'binary');
-      const posteriorBuffer = Buffer.from(posteriorResp.data, 'binary');
+      let y = doc.y;
 
-      doc.image(previaBuffer, startX, y, { fit: [imageWidth, imageHeight] });
-      doc.image(posteriorBuffer, startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
+      doc.image(Buffer.from(previaImg.data), startX, y, { fit: [imageWidth, imageHeight] });
+      doc.image(Buffer.from(posteriorImg.data), startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
 
       doc.fontSize(12).text('Foto previa a la instalación', startX, y + imageHeight + 5, {
         width: imageWidth,
@@ -190,21 +188,13 @@ router.get('/generar/:sesionId', async (req, res) => {
     }
 
     doc.end();
-
-    // 🧹 Eliminar imágenes de Cloudinary y MongoDB
-    for (const img of imagenes) {
-      const publicId = img.url.split('/').slice(-1)[0].split('.')[0];
-      await cloudinary.uploader.destroy(`mi-app/${publicId}`);
-    }
-
-    await Imagen.deleteMany({ sesionId });
-    console.log(`🗑️ Imágenes eliminadas para sesión ${sesionId}`);
   } catch (err) {
-    console.error('❌ Error al generar PDF:', err);
+    console.error('Error al generar PDF:', err);
     res.status(500).send('Error al generar el PDF');
   }
 });
 
 module.exports = router;
+
 
 
