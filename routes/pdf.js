@@ -227,4 +227,4 @@ function getPublicIdFromUrl(url) {
   return match ? match[1] : null;
 }
 
-module.exp
+module.exports = router;
