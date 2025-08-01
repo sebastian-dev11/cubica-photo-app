@@ -117,6 +117,7 @@ const express = require('express');
 const router = express.Router();
 const PDFDocument = require('pdfkit');
 const Imagen = require('../models/imagen');
+const cloudinary = require('../utils/cloudinary');
 
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
@@ -133,16 +134,25 @@ router.get('/generar/:sesionId', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename=informe_tecnico_${sesionId}.pdf`);
     doc.pipe(res);
 
-    // 🏷️ Portada
+    // 🎨 Portada estilizada
     const fechaActual = new Date().toLocaleString('es-CO', {
       dateStyle: 'full',
       timeStyle: 'short'
     });
 
-    doc.fontSize(26).text('Informe Técnico', { align: 'center' });
+    doc.fillColor('#003366')
+      .fontSize(30)
+      .text('📋 Informe Técnico', { align: 'center' });
+
     doc.moveDown();
-    doc.fontSize(16).text(`Sesión ID: ${sesionId}`, { align: 'center' });
-    doc.fontSize(14).text(`Fecha de generación: ${fechaActual}`, { align: 'center' });
+    doc.fontSize(18).fillColor('black').text(`Sesión: ${sesionId}`, { align: 'center' });
+    doc.fontSize(14).text(`Generado: ${fechaActual}`, { align: 'center' });
+
+    doc.moveDown(4);
+    doc.fontSize(12).fillColor('gray').text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', {
+      align: 'center'
+    });
+
     doc.addPage();
 
     // 🖼️ Agrupar imágenes por nombre
@@ -157,44 +167,64 @@ router.get('/generar/:sesionId', async (req, res) => {
       }
     });
 
-    const imageWidth = 250;
-    const imageHeight = 180;
-    const gapX = 40;
-    const gapY = 40;
+    const imageWidth = 240;
+    const imageHeight = 170;
+    const gapX = 50;
     const startX = doc.page.margins.left;
+    let contadorPagina = 1;
 
     for (let i = 0; i < pares.length; i++) {
       const { previa, posterior } = pares[i];
 
-      // Descargar imágenes desde Cloudinary
       const previaImg = await axios.get(previa.url, { responseType: 'arraybuffer' });
       const posteriorImg = await axios.get(posterior.url, { responseType: 'arraybuffer' });
 
       let y = doc.y;
 
+      doc.rect(startX - 10, y - 10, imageWidth * 2 + gapX + 20, imageHeight + 70)
+        .fillOpacity(0.05).fill('#e6f0ff').fillOpacity(1);
+
       doc.image(Buffer.from(previaImg.data), startX, y, { fit: [imageWidth, imageHeight] });
       doc.image(Buffer.from(posteriorImg.data), startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
 
-      doc.fontSize(12).text('Foto previa a la instalación', startX, y + imageHeight + 5, {
-        width: imageWidth,
-        align: 'center'
-      });
-      doc.text('Foto posterior a la instalación', startX + imageWidth + gapX, y + imageHeight + 5, {
-        width: imageWidth,
-        align: 'center'
-      });
+      doc.fillColor('#003366').fontSize(12);
+      doc.text('🔹 Antes de la instalación', startX, y + imageHeight + 5, { width: imageWidth, align: 'center' });
+      doc.text('🔸 Después de la instalación', startX + imageWidth + gapX, y + imageHeight + 5, { width: imageWidth, align: 'center' });
+
+      doc.moveDown().moveTo(startX, doc.y + 20).lineTo(550, doc.y + 20).strokeColor('#cccccc').stroke();
+
+      doc.fontSize(10).fillColor('gray').text(`Página ${contadorPagina++}`, 500, 750, { align: 'right' });
 
       doc.addPage();
     }
 
     doc.end();
+
+    // ✅ Después de generar el PDF: borrar imágenes
+    for (const img of imagenes) {
+      const publicId = getPublicIdFromUrl(img.url);
+      if (publicId) {
+        try {
+          await cloudinary.uploader.destroy(publicId);
+        } catch (err) {
+          console.warn(`⚠️ No se pudo eliminar ${publicId} de Cloudinary`);
+        }
+      }
+    }
+
+    // 🗑️ Eliminar documentos de MongoDB
+    await Imagen.deleteMany({ sesionId });
+    console.log(`🧹 Imágenes de sesión ${sesionId} eliminadas`);
   } catch (err) {
     console.error('Error al generar PDF:', err);
     res.status(500).send('Error al generar el PDF');
   }
 });
 
-module.exports = router;
+// 🔍 Función para obtener el public_id desde la URL de Cloudinary
+function getPublicIdFromUrl(url) {
+  const match = url.match(/\/v\d+\/(.+)\.(jpg|png|jpeg)/);
+  return match ? match[1] : null;
+}
 
-
-
+module.exp
