@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 console.log('✅ imagenes.js cargado correctamente');
 const Imagen = require('../models/imagen');
+console.log('🧪 Tipo de Imagen importado:', typeof Imagen); // debería ser "function"
 const cloudinary = require('../utils/cloudinary.js');
 const multer = require('multer');
 const path = require('path');
