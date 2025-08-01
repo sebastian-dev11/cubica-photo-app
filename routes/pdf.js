@@ -1,4 +1,4 @@
-const axios = require('axios');
+/*const axios = require('axios');
 const express = require('express');
 const router = express.Router();
 const PDFDocument = require('pdfkit');
@@ -110,4 +110,39 @@ router.get('/generar/:sesionId', async (req, res) => {
   }
 });
 
+module.exports = router;*/
+
+const axios = require('axios');
+const express = require('express');
+const router = express.Router();
+const PDFDocument = require('pdfkit');
+
+router.get('/prueba', async (req, res) => {
+  const url = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754012630/mi-app/b5wfrnlpow6ukrmcszzs.jpg';
+
+  try {
+    const response = await axios.get(url, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data, 'binary');
+
+    const doc = new PDFDocument({ margin: 50 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=prueba_imagen.pdf');
+    doc.pipe(res);
+
+    doc.fontSize(20).text('Prueba de imagen desde Cloudinary', { align: 'center' });
+    doc.moveDown();
+
+    doc.image(buffer, {
+      fit: [300, 300],
+      align: 'center'
+    });
+
+    doc.end();
+  } catch (err) {
+    console.error('❌ Error en prueba de imagen:', err);
+    res.status(500).send('Error al probar la imagen');
+  }
+});
+
 module.exports = router;
+
