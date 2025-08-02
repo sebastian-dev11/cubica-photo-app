@@ -9,7 +9,7 @@ router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
 
   try {
-    const imagenes = await Imagen.find({ sesionId });
+    const imagenes = await Imagen.find({ sesionId }).sort({ fechaSubida: 1 });
 
     if (imagenes.length === 0) {
       return res.status(404).send('No hay imágenes para esta sesión');
@@ -26,41 +26,24 @@ router.get('/generar/:sesionId', async (req, res) => {
       timeStyle: 'short'
     });
 
-    doc.fillColor('#007BFF').fontSize(26).text('Informe Técnico', {
-      align: 'center',
-      underline: false
-    });
-
+    doc.fillColor('#007BFF').fontSize(26).text('Informe Técnico', { align: 'center' });
     doc.moveDown(2);
-
-    doc.fillColor('black')
-      .fontSize(16)
-      .text(`Sesión: ${sesionId}`, { align: 'center' });
-
+    doc.fillColor('black').fontSize(16).text(`Sesión: ${sesionId}`, { align: 'center' });
     doc.moveDown(0.5);
-
     doc.fontSize(12).text(`Generado: ${fechaActual}`, { align: 'center' });
-
     doc.moveDown(2);
-
     doc.fontSize(10).fillColor('gray')
-      .text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', {
-        align: 'center'
-      });
-
+      .text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', { align: 'center' });
     doc.addPage();
 
-    // 🖼️ Agrupar imágenes por nombre (ordenadas alfabéticamente)
-    const previas = imagenes.filter(img => img.tipo === 'previa').sort((a, b) => a.nombreOriginal.localeCompare(b.nombreOriginal));
-    const posteriores = imagenes.filter(img => img.tipo === 'posterior').sort((a, b) => a.nombreOriginal.localeCompare(b.nombreOriginal));
+    // 🔀 Emparejar por orden de subida
+    const previas = imagenes.filter(img => img.tipo === 'previa').sort((a, b) => a.fechaSubida - b.fechaSubida);
+    const posteriores = imagenes.filter(img => img.tipo === 'posterior').sort((a, b) => a.fechaSubida - b.fechaSubida);
 
     const pares = [];
-    for (let i = 0; i < previas.length; i++) {
-      const previa = previas[i];
-      const posterior = posteriores.find(p => p.nombreOriginal === previa.nombreOriginal);
-      if (posterior) {
-        pares.push({ previa, posterior });
-      }
+    const minLength = Math.min(previas.length, posteriores.length);
+    for (let i = 0; i < minLength; i++) {
+      pares.push({ previa: previas[i], posterior: posteriores[i] });
     }
 
     const imageWidth = 240;
@@ -69,9 +52,7 @@ router.get('/generar/:sesionId', async (req, res) => {
     const startX = doc.page.margins.left;
     let contadorPagina = 1;
 
-    for (let i = 0; i < pares.length; i++) {
-      const { previa, posterior } = pares[i];
-
+    for (const { previa, posterior } of pares) {
       const previaImg = await axios.get(previa.url, { responseType: 'arraybuffer' });
       const posteriorImg = await axios.get(posterior.url, { responseType: 'arraybuffer' });
 
@@ -88,7 +69,6 @@ router.get('/generar/:sesionId', async (req, res) => {
       doc.text('🔸 Después de la instalación', startX + imageWidth + gapX, y + imageHeight + 5, { width: imageWidth, align: 'center' });
 
       doc.moveDown().moveTo(startX, doc.y + 20).lineTo(550, doc.y + 20).strokeColor('#cccccc').stroke();
-
       doc.fontSize(10).fillColor('gray').text(`Página ${contadorPagina++}`, 500, 750, { align: 'right' });
 
       doc.addPage();
@@ -96,7 +76,7 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     doc.end();
 
-    // ✅ Después de generar el PDF: borrar imágenes en Cloudinary
+    // 🧹 Eliminar imágenes de Cloudinary y MongoDB
     for (const img of imagenes) {
       const publicId = getPublicIdFromUrl(img.url);
       if (publicId) {
@@ -108,7 +88,6 @@ router.get('/generar/:sesionId', async (req, res) => {
       }
     }
 
-    // 🗑️ Eliminar documentos de MongoDB
     await Imagen.deleteMany({ sesionId });
     console.log(`🧹 Imágenes de sesión ${sesionId} eliminadas`);
   } catch (err) {
@@ -117,7 +96,7 @@ router.get('/generar/:sesionId', async (req, res) => {
   }
 });
 
-// 🔍 Función para obtener el public_id desde la URL de Cloudinary
+// 🔍 Obtener public_id desde la URL de Cloudinary
 function getPublicIdFromUrl(url) {
   const match = url.match(/\/v\d+\/(.+)\.(jpg|png|jpeg)/);
   return match ? match[1] : null;
