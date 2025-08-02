@@ -5,11 +5,11 @@ const PDFDocument = require('pdfkit');
 const Imagen = require('../models/imagen');
 const cloudinary = require('../utils/cloudinary');
 
-// URL fija del logo de Cubica
 const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754102481/022e3445-0819-4ebc-962a-d9f0d772bf86_kmyqbw.jpg';
 
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
+  const ubicacion = req.query.ubicacion || 'Sitio no especificado';
 
   try {
     const imagenes = await Imagen.find({ sesionId }).sort({ fechaSubida: 1 });
@@ -30,19 +30,22 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     // 🧾 Portada con logo Cubica
     const logoCubica = await axios.get(LOGO_CUBICA_URL, { responseType: 'arraybuffer' });
-    doc.image(Buffer.from(logoCubica.data), doc.page.width - 100, 40, { width: 50 });
+    doc.image(Buffer.from(logoCubica.data), doc.page.width - 100, 40, { width: 70 });
 
     doc.fillColor('#007BFF').fontSize(24).text('Informe Técnico', 50, 100, { align: 'center' });
     doc.moveDown();
     doc.fillColor('black').fontSize(16).text(`Sesión: ${sesionId}`, { align: 'center' });
     doc.moveDown(0.5);
-    doc.fontSize(12).text(`Generado: ${fechaActual}`, { align: 'center' });
+    doc.fontSize(14).fillColor('black').text(ubicacion, { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(12).fillColor('black').text(`Generado: ${fechaActual}`, { align: 'center' });
     doc.moveDown(2);
     doc.fontSize(10).fillColor('gray')
       .text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', { align: 'center' });
+
     doc.addPage();
 
-    // Agrupar por tipo y emparejar por orden
+    // 🖼️ Agrupar y emparejar imágenes
     const previas = imagenes.filter(img => img.tipo === 'previa');
     const posteriores = imagenes.filter(img => img.tipo === 'posterior');
 
@@ -52,7 +55,6 @@ router.get('/generar/:sesionId', async (req, res) => {
       pares.push({ previa: previas[i], posterior: posteriores[i] });
     }
 
-    // 🖼️ Dibujar tabla tipo informe
     const imageWidth = 220;
     const imageHeight = 160;
     const gapX = 60;
