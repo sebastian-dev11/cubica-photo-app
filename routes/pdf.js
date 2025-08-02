@@ -65,8 +65,8 @@ router.get('/generar/:sesionId', async (req, res) => {
       doc.image(Buffer.from(posteriorImg.data), startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
 
       doc.fillColor('#003366').fontSize(12);
-      doc.text('🔹 Antes de la instalación', startX, y + imageHeight + 5, { width: imageWidth, align: 'center' });
-      doc.text('🔸 Después de la instalación', startX + imageWidth + gapX, y + imageHeight + 5, { width: imageWidth, align: 'center' });
+      doc.text('Antes de la instalación', startX, y + imageHeight + 5, { width: imageWidth, align: 'center' });
+      doc.text('Después de la instalación', startX + imageWidth + gapX, y + imageHeight + 5, { width: imageWidth, align: 'center' });
 
       doc.moveDown().moveTo(startX, doc.y + 20).lineTo(550, doc.y + 20).strokeColor('#cccccc').stroke();
       doc.fontSize(10).fillColor('gray').text(`Página ${contadorPagina++}`, 500, 750, { align: 'right' });
