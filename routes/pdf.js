@@ -47,8 +47,7 @@ router.get('/generar/:sesionId', async (req, res) => {
     doc.fontSize(10).fillColor('gray')
       .text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', { align: 'center', lineGap: 2 });
       
-
-    
+    doc.moveDown(0.5);
 
     // 🖼️ Agrupar y emparejar imágenes
     const previas = imagenes.filter(img => img.tipo === 'previa');
