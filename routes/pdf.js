@@ -6,6 +6,7 @@ const Imagen = require('../models/imagen');
 const cloudinary = require('../utils/cloudinary');
 
 const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754102481/022e3445-0819-4ebc-962a-d9f0d772bf86_kmyqbw.jpg';
+const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754170886/D1_Logo_l5rfzk.jpg';
 
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
@@ -30,7 +31,10 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     // 🧾 Portada con logo Cubica
     const logoCubica = await axios.get(LOGO_CUBICA_URL, { responseType: 'arraybuffer' });
-    doc.image(Buffer.from(logoCubica.data), doc.page.width - 150, 40, { width: 120 });
+    doc.image(Buffer.from(logoCubica.data), doc.page.width - 150, 40, { width: 120 });//Derecha
+
+    const logoD1 = await axios.get(LOGO_D1_URL, { responseType: 'arraybuffer' });
+    doc.image(Buffer.from(logoD1.data), 50, 40, { width: 100 }); // izquierda
 
     doc.fillColor('#007BFF').fontSize(24).text('Informe Técnico', 50, 100, { align: 'center' });
     doc.moveDown();
