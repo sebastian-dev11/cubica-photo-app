@@ -77,7 +77,7 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
     console.error('Error al subir imagen:', err);
     res.status(500).json({ mensaje: 'Error interno al subir imagen' });
   }
-  
-});
 
+});
+  
 module.exports = router;
