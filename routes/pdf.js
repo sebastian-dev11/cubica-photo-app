@@ -30,7 +30,7 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     // 🧾 Portada con logo Cubica
     const logoCubica = await axios.get(LOGO_CUBICA_URL, { responseType: 'arraybuffer' });
-    doc.image(Buffer.from(logoCubica.data), doc.page.width - 100, 40, { width: 70 });
+    doc.image(Buffer.from(logoCubica.data), doc.page.width - 150, 40, { width: 120 });
 
     doc.fillColor('#007BFF').fontSize(24).text('Informe Técnico', 50, 100, { align: 'center' });
     doc.moveDown();
