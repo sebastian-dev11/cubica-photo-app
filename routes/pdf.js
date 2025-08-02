@@ -36,7 +36,7 @@ router.get('/generar/:sesionId', async (req, res) => {
     const logoD1 = await axios.get(LOGO_D1_URL, { responseType: 'arraybuffer' });
     doc.image(Buffer.from(logoD1.data), 50, 40, { width: 100 }); // izquierda
 
-    doc.fillColor('#007BFF').fontSize(24).text('Informe Técnico', 50, 100, { align: 'center' });
+    doc.fillColor('black').fontSize(24).text('Informe Técnico', 50, 100, { align: 'center' });
     doc.moveDown();
     doc.fillColor('black').fontSize(16).text(`Sesión: ${sesionId}`, { align: 'center' });
     doc.moveDown(0.5);
