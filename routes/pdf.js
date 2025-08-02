@@ -45,9 +45,10 @@ router.get('/generar/:sesionId', async (req, res) => {
     doc.fontSize(12).fillColor('black').text(`Generado: ${fechaActual}`, { align: 'center' });
     doc.moveDown(2);
     doc.fontSize(10).fillColor('gray')
-      .text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', { align: 'center' });
+      .text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', { align: 'center', lineGap: 2 });
+      
 
-    doc.addPage();
+    
 
     // 🖼️ Agrupar y emparejar imágenes
     const previas = imagenes.filter(img => img.tipo === 'previa');
