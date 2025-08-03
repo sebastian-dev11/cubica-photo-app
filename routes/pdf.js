@@ -39,7 +39,7 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     doc.fillColor('black').fontSize(24).text('Informe Técnico', 50, 100, { align: 'center' });
     doc.moveDown();
-    doc.fillColor('black').fontSize(16).text(`Sesión: ${sesionId}`, { align: 'center' });
+    //doc.fillColor('black').fontSize(16).text(`Sesión: ${sesionId}`, { align: 'center' }); Texto Sesion: admin
     doc.moveDown(0.5);
     doc.fontSize(14).fillColor('black').text(ubicacion, { align: 'center' });
     doc.moveDown(0.5);

@@ -30,13 +30,13 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({ storage, fileFilter });
 
-// 📤 Ruta para subir imagen con sesión y tipo
+// 📤 Ruta para subir imagen con sesión, tipo y ubicación
 router.post('/subir', upload.single('imagen'), async (req, res) => {
-  const { sesionId, tipo } = req.body;
+  const { sesionId, tipo, ubicacion } = req.body;
 
   // 🛡️ Validaciones
-  if (!req.file || !sesionId || !tipo) {
-    return res.status(400).json({ mensaje: 'Falta imagen, sesionId o tipo' });
+  if (!req.file || !sesionId || !tipo || !ubicacion) {
+    return res.status(400).json({ mensaje: 'Falta imagen, sesionId, tipo o ubicación' });
   }
 
   if (!['previa', 'posterior'].includes(tipo)) {
@@ -61,7 +61,8 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
       nombreArchivoOriginal: req.file.originalname,
       url: resultado.secure_url,
       sesionId,
-      tipo
+      tipo,
+      ubicacion // ✅ guardamos ubicación
     });
 
     await nuevaImagen.save();
@@ -77,7 +78,6 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
     console.error('Error al subir imagen:', err);
     res.status(500).json({ mensaje: 'Error interno al subir imagen' });
   }
-
 });
-  
+
 module.exports = router;

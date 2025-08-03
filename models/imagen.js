@@ -6,7 +6,8 @@ const imagenSchema = new mongoose.Schema({
   url: { type: String, required: true },
   fechaSubida: { type: Date, default: Date.now },
   sesionId: { type: String, required: true },
-  tipo: { type: String, enum: ['previa', 'posterior'], required: true }
+  tipo: { type: String, enum: ['previa', 'posterior'], required: true },
+  ubicacion: { type: String, required: true } // ✅ Nueva propiedad agregada
 });
 
 module.exports = mongoose.model('Imagen', imagenSchema);
