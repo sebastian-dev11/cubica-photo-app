@@ -82,7 +82,7 @@ router.get('/generar/:sesionId', async (req, res) => {
 
       if (previa.observacion) {
         const previaObsHeight = doc.heightOfString(previa.observacion, { width: imageWidth });
-        doc.text(`📝 ${previa.observacion}`, startX, y + imageHeight + 25, {
+        doc.text(`${previa.observacion}`, startX, y + imageHeight + 25, {
           width: imageWidth,
           align: 'center',
         });
@@ -91,7 +91,7 @@ router.get('/generar/:sesionId', async (req, res) => {
 
       if (posterior.observacion) {
         const posteriorObsHeight = doc.heightOfString(posterior.observacion, { width: imageWidth });
-        doc.text(`📝 ${posterior.observacion}`, startX + imageWidth + gapX, y + imageHeight + 25, {
+        doc.text(`${posterior.observacion}`, startX + imageWidth + gapX, y + imageHeight + 25, {
           width: imageWidth,
           align: 'center',
         });
