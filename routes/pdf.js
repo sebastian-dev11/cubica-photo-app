@@ -30,27 +30,25 @@ router.get('/generar/:sesionId', async (req, res) => {
       timeZone: 'America/Bogota'
     });
 
-    // 🧾 Portada con logo Cubica
+    // Logos
     const logoCubica = await axios.get(LOGO_CUBICA_URL, { responseType: 'arraybuffer' });
-    doc.image(Buffer.from(logoCubica.data), doc.page.width - 150, 40, { width: 120 });//Derecha
+    doc.image(Buffer.from(logoCubica.data), doc.page.width - 150, 40, { width: 120 });
 
     const logoD1 = await axios.get(LOGO_D1_URL, { responseType: 'arraybuffer' });
-    doc.image(Buffer.from(logoD1.data), 50, 40, { width: 100 }); // izquierda
+    doc.image(Buffer.from(logoD1.data), 50, 40, { width: 100 });
 
+    // Portada
     doc.fillColor('black').fontSize(24).text('Informe Técnico', 50, 100, { align: 'center' });
     doc.moveDown();
-    //doc.fillColor('black').fontSize(16).text(`Sesión: ${sesionId}`, { align: 'center' }); Texto Sesion: admin
-    doc.moveDown(0.5);
     doc.fontSize(14).fillColor('black').text(ubicacion, { align: 'center' });
     doc.moveDown(0.5);
-    doc.fontSize(12).fillColor('black').text(`Generado: ${fechaActual}`, { align: 'center' });
+    doc.fontSize(12).text(`Generado: ${fechaActual}`, { align: 'center' });
     doc.moveDown(2);
     doc.fontSize(10).fillColor('gray')
       .text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', { align: 'center', lineGap: 2 });
-      
     doc.moveDown(0.5);
 
-    // 🖼️ Agrupar y emparejar imágenes
+    // Emparejar imágenes por orden
     const previas = imagenes.filter(img => img.tipo === 'previa');
     const posteriores = imagenes.filter(img => img.tipo === 'posterior');
 
@@ -60,6 +58,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       pares.push({ previa: previas[i], posterior: posteriores[i] });
     }
 
+    // Renderizar imágenes y observaciones
     const imageWidth = 220;
     const imageHeight = 160;
     const gapX = 60;
@@ -77,7 +76,38 @@ router.get('/generar/:sesionId', async (req, res) => {
       doc.text('Antes de la instalación', startX, y + imageHeight + 5, { width: imageWidth, align: 'center' });
       doc.text('Después de la instalación', startX + imageWidth + gapX, y + imageHeight + 5, { width: imageWidth, align: 'center' });
 
-      y += imageHeight + 60;
+      // Observaciones
+      doc.fontSize(9).fillColor('gray');
+      let maxObsHeight = 0;
+
+      if (previa.observacion) {
+        const previaObsHeight = doc.heightOfString(previa.observacion, { width: imageWidth });
+        doc.text(`📝 ${previa.observacion}`, startX, y + imageHeight + 25, {
+          width: imageWidth,
+          align: 'center',
+        });
+        maxObsHeight = Math.max(maxObsHeight, previaObsHeight);
+      }
+
+      if (posterior.observacion) {
+        const posteriorObsHeight = doc.heightOfString(posterior.observacion, { width: imageWidth });
+        doc.text(`📝 ${posterior.observacion}`, startX + imageWidth + gapX, y + imageHeight + 25, {
+          width: imageWidth,
+          align: 'center',
+        });
+        maxObsHeight = Math.max(maxObsHeight, posteriorObsHeight);
+      }
+
+      // Línea divisoria
+      const lineaY = y + imageHeight + 25 + maxObsHeight + 10;
+      doc.moveTo(startX, lineaY)
+        .lineTo(startX + imageWidth * 2 + gapX, lineaY)
+        .strokeColor('#cccccc')
+        .lineWidth(0.5)
+        .stroke();
+
+      y = lineaY + 20;
+
       if (y + imageHeight > doc.page.height - 100) {
         doc.addPage();
         y = doc.y;
@@ -86,7 +116,7 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     doc.end();
 
-    // 🧹 Eliminar imágenes
+    // Eliminar imágenes
     for (const img of imagenes) {
       const publicId = getPublicIdFromUrl(img.url);
       if (publicId) {
@@ -97,6 +127,7 @@ router.get('/generar/:sesionId', async (req, res) => {
         }
       }
     }
+
     await Imagen.deleteMany({ sesionId });
   } catch (err) {
     console.error('Error al generar PDF:', err);

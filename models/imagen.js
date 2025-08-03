@@ -7,7 +7,8 @@ const imagenSchema = new mongoose.Schema({
   fechaSubida: { type: Date, default: Date.now },
   sesionId: { type: String, required: true },
   tipo: { type: String, enum: ['previa', 'posterior'], required: true },
-  ubicacion: { type: String, required: true } // ✅ Nueva propiedad agregada
+  ubicacion: { type: String, required: true }, // Nueva propiedad agregada
+  observacion: { type: String, default: '' } // Campo opcional
 });
 
 module.exports = mongoose.model('Imagen', imagenSchema);

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const UsuarioUnico = require('../models/UsuarioUnico');
 
-// 🟢 Ruta para login
+// Ruta para login
 router.post('/login', async (req, res) => {
   const { usuario, contraseña } = req.body;
 
@@ -14,9 +14,9 @@ router.post('/login', async (req, res) => {
     }
 
     if (usuario === usuarioUnico.usuario && contraseña === usuarioUnico.contraseña) {
-      res.send('✅ Acceso concedido');
+      res.send('Acceso concedido');
     } else {
-      res.status(401).send('❌ Credenciales incorrectas');
+      res.status(401).send('Credenciales incorrectas');
     }
   } catch (err) {
     res.status(500).send('Error en el servidor');
