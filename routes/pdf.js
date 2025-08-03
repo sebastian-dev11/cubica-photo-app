@@ -26,7 +26,8 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     const fechaActual = new Date().toLocaleString('es-CO', {
       dateStyle: 'full',
-      timeStyle: 'short'
+      timeStyle: 'short',
+      timeZone: 'America/Bogota'
     });
 
     // 🧾 Portada con logo Cubica
