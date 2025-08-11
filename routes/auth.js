@@ -1,24 +1,29 @@
 const express = require('express');
 const router = express.Router();
 const UsuarioUnico = require('../models/UsuarioUnico');
+const bcrypt = require('bcryptjs');
 
-// Ruta para login
 router.post('/login', async (req, res) => {
   const { usuario, contraseña } = req.body;
 
   try {
-    const usuarioUnico = await UsuarioUnico.findOne();
+    // Buscar usuario por nombre de usuario (cedula o 'admin')
+    const usuarioEncontrado = await UsuarioUnico.findOne({ usuario });
 
-    if (!usuarioUnico) {
-      return res.status(404).send('Usuario único no configurado');
+    if (!usuarioEncontrado) {
+      return res.status(404).send('Usuario no encontrado');
     }
 
-    if (usuario === usuarioUnico.usuario && contraseña === usuarioUnico.contraseña) {
-      res.send('Acceso concedido');
-    } else {
-      res.status(401).send('Credenciales incorrectas');
+    // Comparar contraseñas con bcrypt
+    const coincide = await bcrypt.compare(contraseña, usuarioEncontrado.contraseña);
+    if (!coincide) {
+      return res.status(401).send('Credenciales incorrectas');
     }
+
+    // Acceso concedido
+    res.send('Acceso concedido');
   } catch (err) {
+    console.error('Error en login:', err);
     res.status(500).send('Error en el servidor');
   }
 });
