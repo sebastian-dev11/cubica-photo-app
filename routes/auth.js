@@ -20,6 +20,12 @@ router.post('/login', async (req, res) => {
       return res.status(401).send('Credenciales incorrectas');
     }
 
+    // ✅ Respuesta con nombre y mensaje
+    res.json({
+      mensaje: '✅ Acceso concedido',
+      nombre: usuarioEncontrado.nombre
+    });
+
     // Acceso concedido
     res.send('Acceso concedido');
   } catch (err) {
