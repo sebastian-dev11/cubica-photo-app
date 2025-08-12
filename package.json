@@ -23,7 +23,7 @@
     "multer": "^2.0.2",
     "mysql2": "^3.14.2",
     "pdf-lib": "^1.17.1",
-    "pdf-merger-js": "^5.1.2",
+    "pdf-merger-js": "^3.4.0",
     "pdfkit": "^0.17.1",
     "streamifier": "^0.1.1"
   }
