@@ -4,7 +4,7 @@ const mongoose = require('./db');
 const cors = require('cors');
 
 // Registrar modelos ANTES de las rutas
-require('./models/user');
+require('./models/UsuarioUnico');
 require('./models/informe');
 
 const authRoutes = require('./routes/auth');
