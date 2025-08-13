@@ -1,4 +1,3 @@
-// routes/tiendas.js
 const express = require('express');
 const router = express.Router();
 const Tienda = require('../models/tienda');
