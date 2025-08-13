@@ -1,37 +1,44 @@
+// routes/informes.js
 const express = require('express');
 const router = express.Router();
 const Informe = require('../models/informe');
 
 /**
  * GET /informes
- * Parámetros de consulta:
- *   - page: número de página (por defecto 1)
- *   - limit: cantidad de resultados por página (por defecto 10)
- *   - search: texto a buscar en el título
- *   - userId: filtrar por ID de usuario que generó el informe
+ * Permite:
+ *  - Filtrar por título (search)
+ *  - Filtrar por usuario (userId)
+ *  - Paginación (page, limit)
+ * Devuelve:
+ *  - Total de registros
+ *  - Página actual
+ *  - Total de páginas
+ *  - Array de informes con datos del usuario generador
  */
 router.get('/', async (req, res) => {
   try {
     let { page = 1, limit = 10, search = '', userId } = req.query;
-    page = parseInt(page);
-    limit = parseInt(limit);
+    page = parseInt(page, 10);
+    limit = parseInt(limit, 10);
 
     const query = {};
 
-    // Filtro por título si hay búsqueda
+    // Filtro por título
     if (search) {
-      query.title = { $regex: search, $options: 'i' }; // insensible a mayúsculas
+      query.title = { $regex: search, $options: 'i' };
     }
 
-    // Filtro por usuario si se pasa userId
+    // Filtro por usuario específico
     if (userId) {
       query.generatedBy = userId;
     }
 
+    // Total para la paginación
     const total = await Informe.countDocuments(query);
 
+    // Consulta con populate al modelo UsuarioUnico
     const informes = await Informe.find(query)
-      .populate('generatedBy', 'name email') // opcional: trae info del usuario
+      .populate('generatedBy', 'usuario nombre') // ajusta si tu modelo no tiene 'nombre'
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit);
