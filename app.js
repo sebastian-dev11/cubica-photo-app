@@ -1,14 +1,17 @@
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('./db');
+const cors = require('cors');
+
 const authRoutes = require('./routes/auth');
 const imagenRoutes = require('./routes/imagenes');
 const pdfRoutes = require('./routes/pdf');
-const actaRoutes = require('./routes/acta').router; // Importar las rutas de acta
+const actaRoutes = require('./routes/acta').router; 
+const tiendasRoutes = require('./routes/tiendas'); // <-- Nuevo archivo de rutas para tiendas
 
 const app = express();
-const cors = require('cors');
 
+// Middlewares
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -19,9 +22,10 @@ app.use('/login', authRoutes);
 app.use('/crear', authRoutes);
 app.use('/imagenes', imagenRoutes);
 app.use('/pdf', pdfRoutes);
-
-// Nueva ruta para subir acta
 app.use('/acta', actaRoutes);
+
+// Rutas de tiendas
+app.use('/tiendas', tiendasRoutes);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
