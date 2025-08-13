@@ -8,13 +8,27 @@ const PDFMerger = require('pdf-merger-js');
 const Imagen = require('../models/imagen');
 const cloudinary = require('../utils/cloudinary');
 const { actasEnMemoria } = require('./acta');
+const Tienda = require('../models/tienda'); // <-- NUEVO: para obtener nombre/departamento/ciudad
 
 const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754102481/022e3445-0819-4ebc-962a-d9f0d772bf86_kmyqbw.jpg';
 const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754170886/D1_Logo_l5rfzk.jpg';
 
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
-  const ubicacion = req.query.ubicacion || 'Sitio no especificado';
+  const { tiendaId } = req.query; // <-- NUEVO
+  let ubicacion = req.query.ubicacion || 'Sitio no especificado'; // fallback si no envían tiendaId
+
+  // <-- NUEVO: si llega tiendaId, armamos "Nombre - Departamento, Ciudad"
+  if (tiendaId) {
+    try {
+      const tienda = await Tienda.findById(tiendaId);
+      if (tienda) {
+        ubicacion = `${tienda.nombre} - ${tienda.departamento}, ${tienda.ciudad}`;
+      }
+    } catch (e) {
+      console.warn('No se pudo obtener la tienda para el PDF:', e?.message || e);
+    }
+  }
 
   const tempDir = path.join(__dirname, '../uploads/temp');
   if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
@@ -112,7 +126,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       stream.on('finish', resolve);
     });
 
-    // Combinar PDFs
+    // --- Combinar PDFs  ---
     const merger = new PDFMerger();
     await merger.add(pdfImagenesPath);
 
@@ -144,6 +158,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       if (fs.existsSync(pdfFinalPath)) fs.unlinkSync(pdfFinalPath);
     });
 
+    // Limpieza de imágenes de Cloudinary + BD
     for (const img of imagenes) {
       const publicId = getPublicIdFromUrl(img.url);
       if (publicId) {
