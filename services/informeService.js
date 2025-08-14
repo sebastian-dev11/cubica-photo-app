@@ -1,6 +1,7 @@
 // services/informeService.js
 const crypto = require('crypto');
 const Informe = require('../models/informe');
+const Sesion = require('../models/sesion'); // nuevo modelo
 const cloudinary = require('../utils/cloudinary');
 
 function slugify(str) {
@@ -14,12 +15,12 @@ function slugify(str) {
 
 /**
  * Sube un informe PDF a Cloudinary y registra sus metadatos en MongoDB.
- * Genera un publicId único basado en el título + hash del contenido.
- * Limpia el asset de Cloudinary si falla la persistencia en DB.
+ * Si no se pasa generatedBy, intenta resolverlo desde el sesionId.
  *
  * @param {Object} params
  * @param {String} params.title             Título del informe (obligatorio)
  * @param {String|null} [params.generatedBy=null] ID del usuario (opcional)
+ * @param {String|null} [params.sesionId=null] ID de sesión para buscar el usuario (opcional)
  * @param {Buffer} params.buffer            Contenido binario del PDF (obligatorio)
  * @param {Boolean} [params.includesActa=false]  Indica si incluye acta
  * @param {Boolean} [params.overwrite=false]     Si true, permite sobreescritura en Cloudinary
@@ -28,6 +29,7 @@ function slugify(str) {
 async function guardarInforme({
   title,
   generatedBy = null,
+  sesionId = null,
   buffer,
   includesActa = false,
   overwrite = false
@@ -37,6 +39,12 @@ async function guardarInforme({
     throw new Error('El buffer del PDF es obligatorio y debe ser un Buffer válido.');
   }
 
+  // Si no se pasa generatedBy, buscarlo desde la sesión
+  if (!generatedBy && sesionId) {
+    const sesion = await Sesion.findOne({ sesionId });
+    generatedBy = sesion?.usuarioId || null;
+  }
+
   const baseId = slugify(title);
   const hash8 = crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 8);
   const publicId = `${baseId}_${hash8}`;
@@ -44,10 +52,10 @@ async function guardarInforme({
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
-        resource_type: 'raw',   // PDFs
+        resource_type: 'raw',
         folder: 'informes',
-        public_id: publicId,    // único por título+hash
-        overwrite               // por defecto false para no pisar assets
+        public_id: publicId,
+        overwrite
       },
       async (error, result) => {
         if (error) return reject(error);
@@ -60,15 +68,12 @@ async function guardarInforme({
             publicId: result.public_id,
             mimeType: 'application/pdf',
             includesActa
-            // createdAt lo maneja el schema con default
           });
           resolve(informe);
         } catch (dbErr) {
-          // Limpieza: si falló Mongo, eliminamos el asset recién subido
           try {
             await cloudinary.uploader.destroy(result.public_id, { resource_type: 'raw' });
           } catch (cleanupErr) {
-            // Log opcional: no re-lanzamos para no ocultar el error original
             console.warn('No se pudo limpiar asset en Cloudinary tras fallo de DB:', cleanupErr?.message || cleanupErr);
           }
           reject(dbErr);

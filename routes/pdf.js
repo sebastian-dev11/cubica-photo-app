@@ -163,10 +163,10 @@ router.get('/generar/:sesionId', async (req, res) => {
     try {
       const finalBuffer = fs.readFileSync(pdfFinalPath);
       await guardarInforme({
-        title: `Informe técnico ${sesionId}`,
-        generatedBy: req.user?._id || null,
-        buffer: finalBuffer,
-        includesActa: hadActa
+      title: `Informe técnico ${sesionId}`,
+      sesionId,
+      buffer: finalBuffer,
+      includesActa: hadActa
       });
     } catch (err) {
       console.error(`Error guardando informe ${sesionId}:`, err);

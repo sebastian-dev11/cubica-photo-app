@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 
 const informeSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
-  generatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  generatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'UsuarioUnico' },
   url: { type: String, required: true }, // URL Cloudinary
   publicId: { type: String },            // para borrado futuro
   mimeType: { type: String, default: 'application/pdf' },
