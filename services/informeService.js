@@ -13,6 +13,10 @@ function slugify(str) {
     .slice(0, 80);
 }
 
+function esPDF(buffer) {
+  return buffer.slice(0, 4).toString() === '%PDF';
+}
+
 /**
  * Sube un informe PDF a Cloudinary y registra sus metadatos en MongoDB.
  * Si no se pasa generatedBy, intenta resolverlo desde el sesionId.
@@ -38,6 +42,9 @@ async function guardarInforme({
   if (!buffer || !Buffer.isBuffer(buffer)) {
     throw new Error('El buffer del PDF es obligatorio y debe ser un Buffer válido.');
   }
+  if (!esPDF(buffer)) {
+    throw new Error('El archivo no parece ser un PDF válido.');
+  }
 
   // Si no se pasa generatedBy, buscarlo desde la sesión
   if (!generatedBy && sesionId) {
@@ -47,7 +54,7 @@ async function guardarInforme({
 
   const baseId = slugify(title);
   const hash8 = crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 8);
-  const publicId = `${baseId}_${hash8}`;
+  const publicId = `${baseId}_${hash8}.pdf`; // ← extensión añadida
 
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
@@ -55,7 +62,8 @@ async function guardarInforme({
         resource_type: 'raw',
         folder: 'informes',
         public_id: publicId,
-        overwrite
+        overwrite,
+        format: 'pdf' // ← nuevo
       },
       async (error, result) => {
         if (error) return reject(error);
