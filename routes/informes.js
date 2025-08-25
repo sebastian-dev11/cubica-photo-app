@@ -2,10 +2,32 @@
 const express = require('express');
 const router = express.Router();
 const Informe = require('../models/informe');
+const Sesion = require('../models/sesion'); // para verificar admin por sesionId
+const UsuarioUnico = require('../models/UsuarioUnico'); // fallback por si no existiera Sesion.isAdmin
 const {
   eliminarInforme,
   eliminarInformesBulk,
 } = require('../services/informeService');
+
+/**
+ * Helper: determina si la solicitud es de un ADMIN
+ * Fuente de verdad: Sesion.isAdmin (grabado en /login).
+ * Fallback: usuario === 'admin' si por alguna razón no está isAdmin en la sesión.
+ */
+async function isAdminRequest(req) {
+  const sesionId = req.query.sesionId || req.headers['x-sesion-id'];
+  if (!sesionId) return false;
+
+  const sesion = await Sesion.findOne({ sesionId }).lean();
+  if (sesion?.isAdmin) return true;
+
+  // Fallback por si no se guardó isAdmin en Sesion (compatibilidad)
+  if (sesion?.usuarioId) {
+    const user = await UsuarioUnico.findById(sesion.usuarioId).lean();
+    if (user?.usuario === 'admin') return true;
+  }
+  return false;
+}
 
 /**
  * GET /informes
@@ -62,8 +84,9 @@ router.get('/', async (req, res) => {
 
 /**
  * POST /informes/bulk-delete
- * Elimina varios informes (opcional).
+ * Elimina varios informes (ADMIN ONLY).
  * Body: { ids: [<id1>, <id2>, ...] }
+ * Requiere: ?sesionId=<cedula_admin> o header x-sesion-id
  */
 router.post('/bulk-delete', async (req, res) => {
   try {
@@ -72,16 +95,19 @@ router.post('/bulk-delete', async (req, res) => {
       return res.status(400).json({ error: 'Debe enviar un arreglo "ids" con al menos un id.' });
     }
 
-    // Identidad del solicitante (preferir req.user si existe)
-    const requesterUserId = req.user?._id?.toString() || req.query.userId || null;
-    const requesterSesionId = req.user?.sesionId || req.query.sesionId || null;
-    const isAdmin = Boolean(req.user && (req.user.role === 'admin' || req.user.isAdmin));
+    // Check admin
+    const admin = await isAdminRequest(req);
+    if (!admin) {
+      return res.status(403).json({ error: 'Solo admin puede eliminar informes.' });
+    }
+
+    const requesterSesionId = req.query.sesionId || req.headers['x-sesion-id'] || null;
 
     const result = await eliminarInformesBulk({
       ids,
-      requesterUserId,
+      requesterUserId: null,      // no necesario al ser admin
       requesterSesionId,
-      isAdmin,
+      isAdmin: true,              // bypass de propiedad
     });
 
     res.json(result);
@@ -94,21 +120,25 @@ router.post('/bulk-delete', async (req, res) => {
 /**
  * DELETE /informes/:id
  * Elimina un informe y su archivo en Cloudinary (resource_type: 'raw').
+ * ADMIN ONLY — puede borrar cualquiera.
+ * Requiere: ?sesionId=<cedula_admin> o header x-sesion-id
  */
 router.delete('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
+    // Check admin
+    const admin = await isAdminRequest(req);
+    if (!admin) {
+      return res.status(403).json({ error: 'Solo admin puede eliminar informes.' });
+    }
 
-    // Identidad del solicitante (preferir req.user si existe)
-    const requesterUserId = req.user?._id?.toString() || req.query.userId || null;
-    const requesterSesionId = req.user?.sesionId || req.query.sesionId || null;
-    const isAdmin = Boolean(req.user && (req.user.role === 'admin' || req.user.isAdmin));
+    const { id } = req.params;
+    const requesterSesionId = req.query.sesionId || req.headers['x-sesion-id'] || null;
 
     const data = await eliminarInforme({
       id,
-      requesterUserId,
+      requesterUserId: null,   // no necesario al ser admin
       requesterSesionId,
-      isAdmin,
+      isAdmin: true,           // bypass de propiedad
     });
 
     res.json({ ok: true, mensaje: 'Informe eliminado', ...data });

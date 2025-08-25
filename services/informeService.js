@@ -1,7 +1,7 @@
 // services/informeService.js
 const crypto = require('crypto');
 const Informe = require('../models/informe');
-const Sesion = require('../models/sesion'); // Para mapear sesionId -> usuarioId
+const Sesion = require('../models/sesion'); // Para mapear sesionId -> usuarioId (+ isAdmin)
 const cloudinary = require('../utils/cloudinary');
 
 function slugify(str) {
@@ -93,21 +93,34 @@ async function guardarInforme({
   });
 }
 
-/* ============================
+/* 
    ELIMINACIÓN DE INFORMES
-============================ */
+*/
 
 /**
- * Resuelve el userId efectivo del solicitante usando userId directo
- * o buscando por sesionId en la colección Sesion.
+ * Resuelve auth efectiva a partir de userId directo y/o sesionId:
+ * - resolvedUserId: ID del usuario solicitante (si se puede determinar)
+ * - isAdmin: true si viene forzado por parámetro o si la Sesion es admin
  */
-async function resolverUserId({ requesterUserId = null, requesterSesionId = null }) {
-  if (requesterUserId) return requesterUserId.toString();
+async function resolverAuth({ requesterUserId = null, requesterSesionId = null, isAdmin = false }) {
+  let resolvedUserId = null;
+  let admin = !!isAdmin;
+
+  if (requesterUserId) {
+    resolvedUserId = requesterUserId.toString();
+  }
+
   if (requesterSesionId) {
     const sesion = await Sesion.findOne({ sesionId: requesterSesionId }).lean();
-    return sesion?.usuarioId ? sesion.usuarioId.toString() : null;
+    if (sesion?.usuarioId) {
+      resolvedUserId = sesion.usuarioId.toString();
+    }
+    if (!admin && sesion?.isAdmin) {
+      admin = true; // si la sesión marcada como admin, habilita bypass
+    }
   }
-  return null;
+
+  return { resolvedUserId, isAdmin: admin };
 }
 
 /**
@@ -128,7 +141,7 @@ function verificarAutorizacionEliminacion({ informe, resolvedUserId, isAdmin = f
 
 /**
  * Elimina un informe:
- *  - Verifica autorización (propiedad o admin).
+ *  - Verifica autorización (propiedad o admin —admin puede todo).
  *  - Destruye el asset en Cloudinary (resource_type: 'raw').
  *  - Elimina el documento en Mongo.
  * @returns {Promise<{cloudResult: string}>}
@@ -152,19 +165,25 @@ async function eliminarInforme({
     throw err;
   }
 
-  const resolvedUserId = await resolverUserId({ requesterUserId, requesterSesionId });
-  verificarAutorizacionEliminacion({ informe, resolvedUserId, isAdmin });
+  // Resuelve userId e isAdmin efectivo (lee Sesion.isAdmin si llega sesionId)
+  const { resolvedUserId, isAdmin: isAdminEff } = await resolverAuth({
+    requesterUserId,
+    requesterSesionId,
+    isAdmin
+  });
+
+  verificarAutorizacionEliminacion({ informe, resolvedUserId, isAdmin: isAdminEff });
 
   let cloudResult = 'skipped';
   if (informe.publicId) {
     try {
       const resp = await cloudinary.uploader.destroy(informe.publicId, {
         resource_type: 'raw',
-        invalidate: true,
+        invalidate: true
       });
       cloudResult = resp?.result || 'ok'; // 'ok' | 'not found' | ...
     } catch (e) {
-      // Error real de Cloudinary: preferimos no dejar el registro huérfano
+      // Para no dejar el registro huérfano, consideramos este error fatal
       const err = new Error(`Fallo al eliminar en Cloudinary: ${e?.message || e}`);
       err.status = 502;
       throw err;
@@ -197,7 +216,7 @@ async function eliminarInformesBulk({
         id,
         requesterUserId,
         requesterSesionId,
-        isAdmin,
+        isAdmin
       })
     )
   );
@@ -219,5 +238,5 @@ async function eliminarInformesBulk({
 module.exports = {
   guardarInforme,
   eliminarInforme,
-  eliminarInformesBulk,
+  eliminarInformesBulk
 };
