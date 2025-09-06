@@ -57,7 +57,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       return res.status(404).send('No hay imágenes para esta sesión');
     }
 
-    // 1) PDF con imágenes
+    // 1) PDF con imágenes de evidencia (previa/posterior)
     await new Promise(async (resolve) => {
       const doc = new PDFDocument({ margin: 50 });
       const stream = fs.createWriteStream(pdfImagenesPath);
@@ -69,7 +69,7 @@ router.get('/generar/:sesionId', async (req, res) => {
         timeZone: 'America/Bogota'
       });
 
-      // Logos (seguros: si no descargan, se omiten)
+      // Logos (seguros)
       const logoCubicaBuf = await safeGetBuffer(LOGO_CUBICA_URL);
       if (logoCubicaBuf) doc.image(logoCubicaBuf, doc.page.width - 150, 40, { width: 120 });
 
@@ -150,22 +150,26 @@ router.get('/generar/:sesionId', async (req, res) => {
       stream.on('finish', resolve);
     });
 
-    // 2) Fusionar con acta si existe (compatible con estructura nueva y antigua)
+    // 2) Fusionar con acta si existe (PDF y/o IMÁGENES)
     const merger = new PDFMerger();
     await merger.add(pdfImagenesPath);
 
-    const store = actasEnMemoria[sesionId]; // puede ser { acta:{url,public_id}, imagenes:[] } o { url, public_id }
+    const store = actasEnMemoria[sesionId]; // { acta, imagenes[] } o compat antigua { url, public_id }
     const actaUrl = store?.acta?.url || store?.url || null;
     const actaPublicId = store?.acta?.public_id || store?.public_id || null;
-    const hadActa = Boolean(actaUrl);
 
-    if (hadActa) {
+    let hadActaPdf = false;
+    let hadActaImgs = false;
+
+    // 2.a) Adjuntar ACTA en PDF si existe
+    if (actaUrl) {
       const actaPath = path.join(tempDir, `acta-${sesionId}.pdf`);
       try {
         const actaBuf = await safeGetBuffer(actaUrl);
         if (actaBuf && actaBuf.slice(0, 4).toString('utf8') === '%PDF') {
           fs.writeFileSync(actaPath, actaBuf);
           await merger.add(actaPath);
+          hadActaPdf = true;
         } else {
           console.warn(`El acta para ${sesionId} no es un PDF válido o no se pudo descargar`);
         }
@@ -173,18 +177,77 @@ router.get('/generar/:sesionId', async (req, res) => {
           try {
             await cloudinary.uploader.destroy(actaPublicId, { resource_type: 'raw' });
           } catch (e) {
-            console.warn('No se pudo borrar acta en Cloudinary:', e?.message || e);
+            console.warn('No se pudo borrar acta (PDF) en Cloudinary:', e?.message || e);
           }
         }
       } finally {
         if (fs.existsSync(actaPath)) fs.unlinkSync(actaPath);
-        // mantener imágenes de acta en memoria si existieran; solo limpiamos el PDF para no re-duplicar
-        if (store?.acta) store.acta = null;
-        else delete actasEnMemoria[sesionId]; // compat antigua
+        if (store?.acta) store.acta = null; // limpiar del buffer en memoria
+        else if (actaUrl) delete actasEnMemoria[sesionId]; // compat antigua
       }
     }
 
+    // 2.b) Adjuntar ACTA en IMÁGENES si existen
+    const actaImgsArray = Array.isArray(store?.imagenes) ? store.imagenes : [];
+    let actaImgsPath = null;
+    const actaImgsPublicIds = [];
+
+    if (actaImgsArray.length > 0) {
+      // Construir un PDF con cada imagen del acta a página completa
+      actaImgsPath = path.join(tempDir, `acta-imgs-${sesionId}.pdf`);
+      let huboAlguna = false;
+
+      await new Promise(async (resolve) => {
+        const doc = new PDFDocument({ autoFirstPage: false, margin: 40 });
+        const stream = fs.createWriteStream(actaImgsPath);
+        doc.pipe(stream);
+
+        for (const it of actaImgsArray) {
+          const imgBuf = await safeGetBuffer(it?.url);
+          if (!imgBuf) continue;
+          // Añadir página y colocar imagen ajustada
+          doc.addPage();
+          const pageW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+          const pageH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
+          doc.image(imgBuf, doc.page.margins.left, doc.page.margins.top, { fit: [pageW, pageH], align: 'center', valign: 'center' });
+          huboAlguna = true;
+          if (it?.public_id) actaImgsPublicIds.push(it.public_id);
+        }
+
+        doc.end();
+        stream.on('finish', () => resolve());
+      });
+
+      if (fs.existsSync(actaImgsPath)) {
+        // Solo fusionar si realmente se añadió al menos una imagen válida
+        await merger.add(actaImgsPath);
+        hadActaImgs = true;
+      }
+    }
+
+    // Guardar fusión (evidencias + acta PDF + acta imágenes)
     await merger.save(pdfFinalPath);
+
+    // Borrar imágenes del acta en Cloudinary después de generar el PDF final
+    if (actaImgsPublicIds.length > 0) {
+      for (const pid of actaImgsPublicIds) {
+        try {
+          await cloudinary.uploader.destroy(pid, { resource_type: 'image' });
+        } catch (e) {
+          console.warn('No se pudo borrar imagen de acta en Cloudinary:', pid, e?.message || e);
+        }
+      }
+    }
+
+    // Limpiar del buffer en memoria las imágenes del acta
+    if (store && Array.isArray(store.imagenes)) {
+      store.imagenes = [];
+      // si tampoco hay acta PDF, vacía completamente la entrada
+      if (!store.acta || store.acta === null) {
+        // si quedó vacío, eliminamos la entrada para no re-duplicar
+        if (!hadActaPdf && store.imagenes.length === 0) delete actasEnMemoria[sesionId];
+      }
+    }
 
     // 3) Guardar en Cloudinary + Mongo mediante el servicio
     try {
@@ -193,19 +256,21 @@ router.get('/generar/:sesionId', async (req, res) => {
         title: `Informe técnico ${sesionId}`,
         sesionId,
         buffer: finalBuffer,
-        includesActa: hadActa
+        includesActa: hadActaPdf || hadActaImgs
       });
     } catch (err) {
       console.error(`Error guardando informe ${sesionId}:`, err);
     }
 
-    // 4) Descargar al cliente
+    // 4) Enviar al cliente y limpiar temporales
     res.download(pdfFinalPath, `informe_tecnico_${sesionId}.pdf`, () => {
       if (fs.existsSync(pdfImagenesPath)) fs.unlinkSync(pdfImagenesPath);
       if (fs.existsSync(pdfFinalPath)) fs.unlinkSync(pdfFinalPath);
+      const maybeActaImgsPath = path.join(tempDir, `acta-imgs-${sesionId}.pdf`);
+      if (fs.existsSync(maybeActaImgsPath)) fs.unlinkSync(maybeActaImgsPath);
     });
 
-    // 5) Limpieza de imágenes originales en Cloudinary y base de datos
+    // 5) Limpieza de imágenes de evidencia (no de acta, ya borradas arriba)
     for (const img of imagenes) {
       const publicId = getPublicIdFromUrl(img.url);
       if (publicId) {
@@ -216,8 +281,6 @@ router.get('/generar/:sesionId', async (req, res) => {
         }
       }
     }
-
-    // Eliminar registros de esas imágenes en Mongo
     await Imagen.deleteMany({ sesionId });
 
   } catch (err) {
@@ -226,7 +289,7 @@ router.get('/generar/:sesionId', async (req, res) => {
   }
 });
 
-// Utilidad: extrae publicId desde una URL de Cloudinary
+// Utilidad: extrae publicId desde una URL de Cloudinary (evidencias)
 function getPublicIdFromUrl(url) {
   const match = (url || '').match(/\/v\d+\/(.+)\.(jpg|png|jpeg)/);
   return match ? match[1] : null;
