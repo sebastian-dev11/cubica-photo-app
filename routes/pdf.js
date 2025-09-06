@@ -16,6 +16,18 @@ const cloudinary = require('../utils/cloudinary');
 const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754102481/022e3445-0819-4ebc-962a-d9f0d772bf86_kmyqbw.jpg';
 const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754170886/D1_Logo_l5rfzk.jpg';
 
+/* ========= Helper seguro para descargar binarios ========= */
+async function safeGetBuffer(url) {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    const resp = await axios.get(url, { responseType: 'arraybuffer' });
+    return Buffer.from(resp.data);
+  } catch (err) {
+    console.warn('No se pudo descargar:', url, err?.message || err);
+    return null;
+  }
+}
+
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
   const { tiendaId } = req.query;
@@ -57,12 +69,12 @@ router.get('/generar/:sesionId', async (req, res) => {
         timeZone: 'America/Bogota'
       });
 
-      // Logos
-      const logoCubica = await axios.get(LOGO_CUBICA_URL, { responseType: 'arraybuffer' });
-      doc.image(Buffer.from(logoCubica.data), doc.page.width - 150, 40, { width: 120 });
+      // Logos (seguros: si no descargan, se omiten)
+      const logoCubicaBuf = await safeGetBuffer(LOGO_CUBICA_URL);
+      if (logoCubicaBuf) doc.image(logoCubicaBuf, doc.page.width - 150, 40, { width: 120 });
 
-      const logoD1 = await axios.get(LOGO_D1_URL, { responseType: 'arraybuffer' });
-      doc.image(Buffer.from(logoD1.data), 50, 40, { width: 100 });
+      const logoD1Buf = await safeGetBuffer(LOGO_D1_URL);
+      if (logoD1Buf) doc.image(logoD1Buf, 50, 40, { width: 100 });
 
       // Títulos
       doc.fillColor('black').fontSize(24).text('Informe Técnico', 50, 100, { align: 'center' });
@@ -92,11 +104,15 @@ router.get('/generar/:sesionId', async (req, res) => {
       for (let i = 0; i < pares.length; i++) {
         const { previa, posterior } = pares[i];
 
-        const previaImg = await axios.get(previa.url, { responseType: 'arraybuffer' });
-        const posteriorImg = await axios.get(posterior.url, { responseType: 'arraybuffer' });
+        const previaBuf = await safeGetBuffer(previa?.url);
+        const posteriorBuf = await safeGetBuffer(posterior?.url);
+        if (!previaBuf || !posteriorBuf) {
+          console.warn('Se omite un par por URL inválida/indescargable');
+          continue;
+        }
 
-        doc.image(Buffer.from(previaImg.data), startX, y, { fit: [imageWidth, imageHeight] });
-        doc.image(Buffer.from(posteriorImg.data), startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
+        doc.image(previaBuf, startX, y, { fit: [imageWidth, imageHeight] });
+        doc.image(posteriorBuf, startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
 
         // Etiquetas
         doc.fontSize(11).fillColor('#003366')
@@ -134,26 +150,37 @@ router.get('/generar/:sesionId', async (req, res) => {
       stream.on('finish', resolve);
     });
 
-    // 2) Fusionar con acta si existe
+    // 2) Fusionar con acta si existe (compatible con estructura nueva y antigua)
     const merger = new PDFMerger();
     await merger.add(pdfImagenesPath);
 
-    const hadActa = Boolean(actasEnMemoria[sesionId]);
+    const store = actasEnMemoria[sesionId]; // puede ser { acta:{url,public_id}, imagenes:[] } o { url, public_id }
+    const actaUrl = store?.acta?.url || store?.url || null;
+    const actaPublicId = store?.acta?.public_id || store?.public_id || null;
+    const hadActa = Boolean(actaUrl);
+
     if (hadActa) {
-      const { url, public_id } = actasEnMemoria[sesionId];
       const actaPath = path.join(tempDir, `acta-${sesionId}.pdf`);
       try {
-        const actaResponse = await axios.get(url, { responseType: 'arraybuffer' });
-        if (actaResponse.data.slice(0, 4).toString() === '%PDF') {
-          fs.writeFileSync(actaPath, actaResponse.data);
+        const actaBuf = await safeGetBuffer(actaUrl);
+        if (actaBuf && actaBuf.slice(0, 4).toString('utf8') === '%PDF') {
+          fs.writeFileSync(actaPath, actaBuf);
           await merger.add(actaPath);
         } else {
-          console.warn(`El acta para ${sesionId} no es un PDF válido`);
+          console.warn(`El acta para ${sesionId} no es un PDF válido o no se pudo descargar`);
         }
-        await cloudinary.uploader.destroy(public_id, { resource_type: 'raw' });
+        if (actaPublicId) {
+          try {
+            await cloudinary.uploader.destroy(actaPublicId, { resource_type: 'raw' });
+          } catch (e) {
+            console.warn('No se pudo borrar acta en Cloudinary:', e?.message || e);
+          }
+        }
       } finally {
         if (fs.existsSync(actaPath)) fs.unlinkSync(actaPath);
-        delete actasEnMemoria[sesionId];
+        // mantener imágenes de acta en memoria si existieran; solo limpiamos el PDF para no re-duplicar
+        if (store?.acta) store.acta = null;
+        else delete actasEnMemoria[sesionId]; // compat antigua
       }
     }
 
@@ -163,10 +190,10 @@ router.get('/generar/:sesionId', async (req, res) => {
     try {
       const finalBuffer = fs.readFileSync(pdfFinalPath);
       await guardarInforme({
-      title: `Informe técnico ${sesionId}`,
-      sesionId,
-      buffer: finalBuffer,
-      includesActa: hadActa
+        title: `Informe técnico ${sesionId}`,
+        sesionId,
+        buffer: finalBuffer,
+        includesActa: hadActa
       });
     } catch (err) {
       console.error(`Error guardando informe ${sesionId}:`, err);
@@ -201,9 +228,8 @@ router.get('/generar/:sesionId', async (req, res) => {
 
 // Utilidad: extrae publicId desde una URL de Cloudinary
 function getPublicIdFromUrl(url) {
-  const match = url.match(/\/v\d+\/(.+)\.(jpg|png|jpeg)/);
+  const match = (url || '').match(/\/v\d+\/(.+)\.(jpg|png|jpeg)/);
   return match ? match[1] : null;
 }
 
 module.exports = router;
-
