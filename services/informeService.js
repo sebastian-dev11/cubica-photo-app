@@ -1,4 +1,3 @@
-// services/informeService.js
 const crypto = require('crypto');
 const Informe = require('../models/informe');
 const Sesion = require('../models/sesion'); // Para mapear sesionId -> usuarioId (+ isAdmin)

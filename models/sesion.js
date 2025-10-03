@@ -1,4 +1,3 @@
-// models/Sesion.js
 const mongoose = require('mongoose');
 
 const sesionSchema = new mongoose.Schema({

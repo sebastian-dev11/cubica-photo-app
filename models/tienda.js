@@ -1,4 +1,3 @@
-// models/tienda.js
 const mongoose = require('../db');
 
 const tiendaSchema = new mongoose.Schema({

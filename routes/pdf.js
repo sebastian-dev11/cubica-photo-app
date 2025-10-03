@@ -28,6 +28,20 @@ async function safeGetBuffer(url) {
   }
 }
 
+/* ========= Helper: dibujar imagen centrada en una caja ========= */
+function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
+  const img = doc.openImage(imgBuffer);
+  const iw = img.width || 1;
+  const ih = img.height || 1;
+  const scale = Math.min(boxW / iw, boxH / ih);
+  const drawW = Math.max(1, Math.floor(iw * scale));
+  const drawH = Math.max(1, Math.floor(ih * scale));
+  const drawX = boxX + Math.floor((boxW - drawW) / 2);
+  const drawY = boxY + Math.floor((boxH - drawH) / 2);
+  doc.image(imgBuffer, drawX, drawY, { width: drawW, height: drawH });
+  return { drawX, drawY, drawW, drawH };
+}
+
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
   const { tiendaId } = req.query;
@@ -69,7 +83,7 @@ router.get('/generar/:sesionId', async (req, res) => {
         timeZone: 'America/Bogota'
       });
 
-      // Logos (seguros)
+      // Logos
       const logoCubicaBuf = await safeGetBuffer(LOGO_CUBICA_URL);
       if (logoCubicaBuf) doc.image(logoCubicaBuf, doc.page.width - 150, 40, { width: 120 });
 
@@ -91,12 +105,11 @@ router.get('/generar/:sesionId', async (req, res) => {
       const posteriores = imagenes.filter(img => img.tipo === 'posterior');
       const pares = [];
       const minLength = Math.min(previas.length, posteriores.length);
-      for (let i = 0; i < minLength; i++) {
-        pares.push({ previa: previas[i], posterior: posteriores[i] });
-      }
+      for (let i = 0; i < minLength; i++) pares.push({ previa: previas[i], posterior: posteriores[i] });
 
-      const imageWidth = 220;
-      const imageHeight = 160;
+      // Caja de dibujo por imagen
+      const boxW = 220;
+      const boxH = 160;
       const gapX = 60;
       const startX = doc.page.margins.left;
       let y = doc.y;
@@ -111,35 +124,45 @@ router.get('/generar/:sesionId', async (req, res) => {
           continue;
         }
 
-        doc.image(previaBuf, startX, y, { fit: [imageWidth, imageHeight] });
-        doc.image(posteriorBuf, startX + imageWidth + gapX, y, { fit: [imageWidth, imageHeight] });
+        // Caja izquierda y derecha
+        const leftX = startX;
+        const rightX = startX + boxW + gapX;
 
-        // Etiquetas
+        // Dibuja centrado en la caja
+        centerImageInBox(doc, previaBuf, leftX, y, boxW, boxH);
+        centerImageInBox(doc, posteriorBuf, rightX, y, boxW, boxH);
+
+        // Etiquetas bajo la caja, no bajo el alto dibujado
+        const labelsY = y + boxH + 5;
         doc.fontSize(11).fillColor('#003366')
-          .text('Antes de la instalación', startX, y + imageHeight + 5, { width: imageWidth, align: 'center' })
-          .text('Después de la instalación', startX + imageWidth + gapX, y + imageHeight + 5, { width: imageWidth, align: 'center' });
+          .text('Antes de la instalación', leftX, labelsY, { width: boxW, align: 'center' })
+          .text('Después de la instalación', rightX, labelsY, { width: boxW, align: 'center' });
 
         // Observaciones
         doc.fontSize(9).fillColor('gray');
+        const obsY = labelsY + 20;
         let maxObsHeight = 0;
+
         if (previa.observacion) {
-          const h = doc.heightOfString(previa.observacion, { width: imageWidth });
-          doc.text(previa.observacion, startX, y + imageHeight + 25, { width: imageWidth, align: 'center' });
+          const h = doc.heightOfString(previa.observacion, { width: boxW });
+          doc.text(previa.observacion, leftX, obsY, { width: boxW, align: 'center' });
           maxObsHeight = Math.max(maxObsHeight, h);
         }
         if (posterior.observacion) {
-          const h = doc.heightOfString(posterior.observacion, { width: imageWidth });
-          doc.text(posterior.observacion, startX + imageWidth + gapX, y + imageHeight + 25, { width: imageWidth, align: 'center' });
+          const h = doc.heightOfString(posterior.observacion, { width: boxW });
+          doc.text(posterior.observacion, rightX, obsY, { width: boxW, align: 'center' });
           maxObsHeight = Math.max(maxObsHeight, h);
         }
 
         // Línea divisoria
-        const lineaY = y + imageHeight + 25 + maxObsHeight + 10;
-        doc.moveTo(startX, lineaY).lineTo(startX + imageWidth * 2 + gapX, lineaY)
+        const lineaY = obsY + maxObsHeight + 10;
+        doc.moveTo(startX, lineaY).lineTo(startX + boxW * 2 + gapX, lineaY)
           .strokeColor('#cccccc').lineWidth(0.5).stroke();
 
+        // Avance vertical
         y = lineaY + 20;
 
+        // Salto de página cada 2 pares
         if ((i + 1) % 2 === 0 && i !== pares.length - 1) {
           doc.addPage();
           y = doc.y;
@@ -154,7 +177,7 @@ router.get('/generar/:sesionId', async (req, res) => {
     const merger = new PDFMerger();
     await merger.add(pdfImagenesPath);
 
-    const store = actasEnMemoria[sesionId]; // { acta, imagenes[] } o compat antigua { url, public_id }
+    const store = actasEnMemoria[sesionId];
     const actaUrl = store?.acta?.url || store?.url || null;
     const actaPublicId = store?.acta?.public_id || store?.public_id || null;
 
@@ -182,8 +205,8 @@ router.get('/generar/:sesionId', async (req, res) => {
         }
       } finally {
         if (fs.existsSync(actaPath)) fs.unlinkSync(actaPath);
-        if (store?.acta) store.acta = null; // limpiar del buffer en memoria
-        else if (actaUrl) delete actasEnMemoria[sesionId]; // compat antigua
+        if (store?.acta) store.acta = null;
+        else if (actaUrl) delete actasEnMemoria[sesionId];
       }
     }
 
@@ -193,9 +216,7 @@ router.get('/generar/:sesionId', async (req, res) => {
     const actaImgsPublicIds = [];
 
     if (actaImgsArray.length > 0) {
-      // Construir un PDF con cada imagen del acta a página completa
       actaImgsPath = path.join(tempDir, `acta-imgs-${sesionId}.pdf`);
-      let huboAlguna = false;
 
       await new Promise(async (resolve) => {
         const doc = new PDFDocument({ autoFirstPage: false, margin: 40 });
@@ -205,12 +226,17 @@ router.get('/generar/:sesionId', async (req, res) => {
         for (const it of actaImgsArray) {
           const imgBuf = await safeGetBuffer(it?.url);
           if (!imgBuf) continue;
-          // Añadir página y colocar imagen ajustada
+
+          // Página y caja de contenido
           doc.addPage();
-          const pageW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-          const pageH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
-          doc.image(imgBuf, doc.page.margins.left, doc.page.margins.top, { fit: [pageW, pageH], align: 'center', valign: 'center' });
-          huboAlguna = true;
+          const boxX = doc.page.margins.left;
+          const boxY = doc.page.margins.top;
+          const boxW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+          const boxH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
+
+          // Centrado en página
+          centerImageInBox(doc, imgBuf, boxX, boxY, boxW, boxH);
+
           if (it?.public_id) actaImgsPublicIds.push(it.public_id);
         }
 
@@ -219,7 +245,6 @@ router.get('/generar/:sesionId', async (req, res) => {
       });
 
       if (fs.existsSync(actaImgsPath)) {
-        // Solo fusionar si realmente se añadió al menos una imagen válida
         await merger.add(actaImgsPath);
         hadActaImgs = true;
       }
@@ -242,9 +267,7 @@ router.get('/generar/:sesionId', async (req, res) => {
     // Limpiar del buffer en memoria las imágenes del acta
     if (store && Array.isArray(store.imagenes)) {
       store.imagenes = [];
-      // si tampoco hay acta PDF, vacía completamente la entrada
       if (!store.acta || store.acta === null) {
-        // si quedó vacío, eliminamos la entrada para no re-duplicar
         if (!hadActaPdf && store.imagenes.length === 0) delete actasEnMemoria[sesionId];
       }
     }
@@ -270,7 +293,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       if (fs.existsSync(maybeActaImgsPath)) fs.unlinkSync(maybeActaImgsPath);
     });
 
-    // 5) Limpieza de imágenes de evidencia (no de acta, ya borradas arriba)
+    // 5) Limpieza de imágenes de evidencia
     for (const img of imagenes) {
       const publicId = getPublicIdFromUrl(img.url);
       if (publicId) {

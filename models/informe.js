@@ -1,4 +1,3 @@
-// models/informe.js
 const mongoose = require('mongoose');
 
 const informeSchema = new mongoose.Schema({
