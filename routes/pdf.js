@@ -74,12 +74,29 @@ router.get('/generar/:sesionId', async (req, res) => {
     }
   };
 
+  // Limpia evidencias (Cloudinary + Mongo) en background
+  const cleanupEvidencesAsync = async (imagenes) => {
+    try {
+      for (const img of imagenes || []) {
+        const publicId = getPublicIdFromUrl(img.url);
+        if (publicId) {
+          try { await cloudinary.uploader.destroy(publicId); }
+          catch (err) { console.warn(`No se pudo eliminar ${publicId} de Cloudinary:`, err?.message || err); }
+        }
+      }
+      await Imagen.deleteMany({ sesionId });
+    } catch (e) {
+      console.warn('No se pudo limpiar evidencias:', e?.message || e);
+    }
+  };
+
   try {
     const imagenes = await Imagen.find({ sesionId }).sort({ fechaSubida: 1 });
     if (imagenes.length === 0) {
       return res.status(404).send('No hay imágenes para esta sesión');
     }
 
+    // 1) PDF de evidencias
     await new Promise(async (resolve) => {
       const doc = new PDFDocument({ margin: 50 });
       const stream = fs.createWriteStream(pdfImagenesPath);
@@ -163,6 +180,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       stream.on('finish', resolve);
     });
 
+    // 2) Fusionar con ACTA
     const merger = new PDFMerger();
     await merger.add(pdfImagenesPath);
 
@@ -230,6 +248,7 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     await merger.save(pdfFinalPath);
 
+    // Borrar imágenes del acta (Cloudinary) ahora que ya se incrustaron
     if (actaImgsPublicIds.length > 0) {
       for (const pid of actaImgsPublicIds) {
         try { await cloudinary.uploader.destroy(pid, { resource_type: 'image' }); }
@@ -244,7 +263,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       }
     }
 
-    // Sube a Cloudinary + guarda en Mongo. Debe devolver metadata con url.
+    // 3) Sube a Cloudinary + guarda en Mongo. Debe devolver metadata con url.
     let uploadMeta = null;
     try {
       const finalBuffer = fs.readFileSync(pdfFinalPath);
@@ -258,7 +277,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       console.error(`Error guardando informe ${sesionId}:`, err);
     }
 
-    // Modo JSON: devuelve la URL final de Cloudinary
+    // 4) Responder en JSON o descargar
     if (wantsJson) {
       cleanupTemps();
 
@@ -266,16 +285,22 @@ router.get('/generar/:sesionId', async (req, res) => {
         uploadMeta?.url ||
         uploadMeta?.secure_url ||
         uploadMeta?.cloudinary?.secure_url ||
+        uploadMeta?.informe?.url || // fallback si servicio guarda y retorna doc
         null;
 
       if (!cloudUrl) {
-        return res.status(500).json({ error: 'No se obtuvo URL del informe en Cloudinary' });
+        // Limpia evidencias en background aunque haya fallo de URL
+        setImmediate(() => cleanupEvidencesAsync(imagenes));
+        return res.status(500).json({ ok: false, error: 'No se obtuvo URL del informe en Cloudinary' });
       }
 
+      // Limpia evidencias en background y responde
+      setImmediate(() => cleanupEvidencesAsync(imagenes));
+
       return res.status(201).json({
+        ok: true,
         url: cloudUrl,
-        public_id: uploadMeta?.public_id || uploadMeta?.cloudinary?.public_id || null,
-        version: uploadMeta?.version || uploadMeta?.cloudinary?.version || null,
+        public_id: uploadMeta?.public_id || uploadMeta?.cloudinary?.public_id || uploadMeta?.informe?.public_id || null,
         includesActa: hadActaPdf || hadActaImgs,
         sesionId,
         tiendaId: tiendaId || null,
@@ -283,22 +308,18 @@ router.get('/generar/:sesionId', async (req, res) => {
       });
     }
 
-    // Modo descarga: envía el archivo
-    res.download(pdfFinalPath, `informe_tecnico_${sesionId}.pdf`, () => cleanupTemps());
-
-    // Limpieza de evidencias
-    for (const img of imagenes) {
-      const publicId = getPublicIdFromUrl(img.url);
-      if (publicId) {
-        try { await cloudinary.uploader.destroy(publicId); }
-        catch (err) { console.warn(`No se pudo eliminar ${publicId} de Cloudinary:`, err?.message || err); }
-      }
-    }
-    await Imagen.deleteMany({ sesionId });
+    // Modo descarga: envía el archivo y limpia al terminar (incluye evidencias)
+    res.download(pdfFinalPath, `informe_tecnico_${sesionId}.pdf`, () => {
+      cleanupTemps();
+      setImmediate(() => cleanupEvidencesAsync(imagenes));
+    });
 
   } catch (err) {
     console.error('Error al generar PDF:', err);
     cleanupTemps();
+    if (wantsJson) {
+      return res.status(500).json({ ok: false, error: 'Error al generar el PDF' });
+    }
     res.status(500).send('Error al generar el PDF');
   }
 });

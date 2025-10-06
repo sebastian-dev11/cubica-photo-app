@@ -1,4 +1,3 @@
-// routes/informes.js
 const express = require('express');
 const router = express.Router();
 const Informe = require('../models/informe');
@@ -9,11 +8,11 @@ const {
   eliminarInformesBulk,
 } = require('../services/informeService');
 
-/**
- * Helper: determina si la solicitud es de un ADMIN
- * Fuente de verdad: Sesion.isAdmin (grabado en /login).
- * Fallback: usuario === 'admin' si por alguna razón no está isAdmin en la sesión.
- */
+/* =========================
+   Helpers
+========================= */
+
+/** Determina si la solicitud es de un ADMIN (por sesionId en query o header). */
 async function isAdminRequest(req) {
   const sesionId = req.query.sesionId || req.headers['x-sesion-id'];
   if (!sesionId) return false;
@@ -21,7 +20,7 @@ async function isAdminRequest(req) {
   const sesion = await Sesion.findOne({ sesionId }).lean();
   if (sesion?.isAdmin) return true;
 
-  // Fallback por si no se guardó isAdmin en Sesion (compatibilidad)
+  // Fallback: si no quedó isAdmin en Sesion, revisa usuario
   if (sesion?.usuarioId) {
     const user = await UsuarioUnico.findById(sesion.usuarioId).lean();
     if (user?.usuario === 'admin') return true;
@@ -29,29 +28,48 @@ async function isAdminRequest(req) {
   return false;
 }
 
+/** Normaliza y limita la paginación */
+function sanitizePagination(page, limit) {
+  let p = parseInt(page, 10);
+  let l = parseInt(limit, 10);
+  if (!Number.isFinite(p) || p < 1) p = 1;
+  if (!Number.isFinite(l) || l < 1) l = 10;
+  // límite duro para proteger el backend
+  if (l > 100) l = 100;
+  return { page: p, limit: l };
+}
+
+/** Calcula un URL compartible a partir del doc de Informe */
+function computeShareUrl(inf) {
+  return (
+    inf?.url ||
+    inf?.secure_url ||
+    inf?.cloudinary?.secure_url ||
+    null
+  );
+}
+
+/* =========================
+   GET /informes  (listado)
+========================= */
 /**
- * GET /informes
- * Permite:
- *  - Filtrar por título (search)
- *  - Filtrar por usuario (userId)
- *  - Paginación (page, limit)
- * Devuelve:
- *  - Total de registros
- *  - Página actual
- *  - Total de páginas
- *  - Array de informes con datos del usuario generador
+ * Query params soportados:
+ *  - page, limit
+ *  - search (coincide en title o ubicacion, case-insensitive)
+ *  - userId (filtra por generatedBy)
+ *  - from, to (ISO 8601 o YYYY-MM-DD) — rango por createdAt [from, to)
  */
 router.get('/', async (req, res) => {
   try {
-    let { page = 1, limit = 10, search = '', userId } = req.query;
-    page = parseInt(page, 10);
-    limit = parseInt(limit, 10);
+    const { page, limit } = sanitizePagination(req.query.page, req.query.limit);
+    const { search = '', userId, from, to } = req.query;
 
     const query = {};
 
-    // Filtro por título
+    // Filtro por texto: title o ubicacion
     if (search) {
-      query.title = { $regex: search, $options: 'i' };
+      const rx = new RegExp(search, 'i');
+      query.$or = [{ title: rx }, { ubicacion: rx }];
     }
 
     // Filtro por usuario específico
@@ -59,35 +77,123 @@ router.get('/', async (req, res) => {
       query.generatedBy = userId;
     }
 
-    // Total para la paginación
+    // Rango de fechas por createdAt
+    if (from || to) {
+      query.createdAt = {};
+      if (from) {
+        const d = new Date(from);
+        if (!isNaN(d)) query.createdAt.$gte = d;
+      }
+      if (to) {
+        const d = new Date(to);
+        if (!isNaN(d)) query.createdAt.$lt = d;
+      }
+      // si quedó vacío, elimínalo
+      if (Object.keys(query.createdAt).length === 0) delete query.createdAt;
+    }
+
     const total = await Informe.countDocuments(query);
 
-    // Consulta con populate al modelo UsuarioUnico
     const informes = await Informe.find(query)
       .populate('generatedBy', 'usuario nombre')
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
-      .limit(limit);
+      .limit(limit)
+      .lean();
 
-    res.json({
+    // Adjunta shareUrl siempre (para evitar “no viene la URL” en front)
+    const data = (informes || []).map((inf) => ({
+      ...inf,
+      shareUrl: computeShareUrl(inf),
+    }));
+
+    res.set('Cache-Control', 'no-store');
+    return res.json({
       total,
       page,
       totalPages: Math.ceil(total / limit),
-      data: informes
+      data,
     });
 
   } catch (err) {
     console.error('Error obteniendo informes:', err);
-    res.status(500).json({ error: 'Error al obtener informes' });
+    return res.status(500).json({ error: 'Error al obtener informes' });
   }
 });
 
-/**
- * POST /informes/bulk-delete
- * Elimina varios informes (ADMIN ONLY).
- * Body: { ids: [<id1>, <id2>, ...] }
- * Requiere: ?sesionId=<cedula_admin> o header x-sesion-id
- */
+/* =========================================================
+   GET /informes/:id  — Obtiene un informe por id (ADMIN)
+========================================================= */
+router.get('/:id', async (req, res) => {
+  try {
+    const admin = await isAdminRequest(req);
+    if (!admin) {
+      return res.status(403).json({ error: 'Solo admin puede ver informes por ID.' });
+    }
+
+    const { id } = req.params;
+    const inf = await Informe.findById(id)
+      .populate('generatedBy', 'usuario nombre')
+      .lean();
+
+    if (!inf) {
+      return res.status(404).json({ error: 'Informe no encontrado' });
+    }
+
+    return res.json({
+      ...inf,
+      shareUrl: computeShareUrl(inf),
+    });
+  } catch (err) {
+    console.error('Error consultando informe:', err);
+    return res.status(500).json({ error: 'Error al consultar informe' });
+  }
+});
+
+/* =======================================================================================
+   GET /informes/ultimo-por-sesion?sesionId=XXXX
+   Devuelve el último informe creado para esa sesión.
+   - ADMIN: puede consultar cualquier sesionId.
+   - No admin: solo puede consultar si el sesionId del query/header coincide con el pedido.
+======================================================================================= */
+router.get('/utils/ultimo-por-sesion', async (req, res) => {
+  try {
+    const targetSesionId = req.query.sesionId;
+    if (!targetSesionId) {
+      return res.status(400).json({ error: 'Debe enviar ?sesionId=...' });
+    }
+
+    // Permisos
+    const admin = await isAdminRequest(req);
+    if (!admin) {
+      // Si no es admin, solo permitimos consultar su propia sesión
+      const requester = req.query.sesionId || req.headers['x-sesion-id'];
+      if (!requester || requester !== targetSesionId) {
+        return res.status(403).json({ error: 'No autorizado para consultar esta sesión' });
+      }
+    }
+
+    const inf = await Informe.findOne({ sesionId: targetSesionId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!inf) {
+      return res.status(404).json({ error: 'No hay informes para esa sesión' });
+    }
+
+    return res.json({
+      ...inf,
+      shareUrl: computeShareUrl(inf),
+    });
+  } catch (err) {
+    console.error('Error consultando último informe por sesión:', err);
+    return res.status(500).json({ error: 'Error al consultar' });
+  }
+});
+
+/* ==========================================
+   POST /informes/bulk-delete  (ADMIN ONLY)
+========================================== */
 router.post('/bulk-delete', async (req, res) => {
   try {
     const { ids } = req.body || {};
@@ -95,7 +201,6 @@ router.post('/bulk-delete', async (req, res) => {
       return res.status(400).json({ error: 'Debe enviar un arreglo "ids" con al menos un id.' });
     }
 
-    // Check admin
     const admin = await isAdminRequest(req);
     if (!admin) {
       return res.status(403).json({ error: 'Solo admin puede eliminar informes.' });
@@ -110,22 +215,18 @@ router.post('/bulk-delete', async (req, res) => {
       isAdmin: true,              // bypass de propiedad
     });
 
-    res.json(result);
+    return res.json(result);
   } catch (err) {
     console.error('Error en bulk-delete informes:', err);
-    res.status(err.status || 500).json({ error: err.message || 'Error al eliminar informes' });
+    return res.status(err.status || 500).json({ error: err.message || 'Error al eliminar informes' });
   }
 });
 
-/**
- * DELETE /informes/:id
- * Elimina un informe y su archivo en Cloudinary (resource_type: 'raw').
- * ADMIN ONLY — puede borrar cualquiera.
- * Requiere: ?sesionId=<cedula_admin> o header x-sesion-id
- */
+/* ===============================
+   DELETE /informes/:id  (ADMIN)
+=============================== */
 router.delete('/:id', async (req, res) => {
   try {
-    // Check admin
     const admin = await isAdminRequest(req);
     if (!admin) {
       return res.status(403).json({ error: 'Solo admin puede eliminar informes.' });
@@ -141,10 +242,10 @@ router.delete('/:id', async (req, res) => {
       isAdmin: true,           // bypass de propiedad
     });
 
-    res.json({ ok: true, mensaje: 'Informe eliminado', ...data });
+    return res.json({ ok: true, mensaje: 'Informe eliminado', ...data });
   } catch (err) {
     console.error('Error eliminando informe:', err);
-    res.status(err.status || 500).json({ error: err.message || 'Error al eliminar informe' });
+    return res.status(err.status || 500).json({ error: err.message || 'Error al eliminar informe' });
   }
 });
 
