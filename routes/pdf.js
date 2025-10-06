@@ -1,4 +1,3 @@
-// routes/pdf.js
 const axios = require('axios');
 const express = require('express');
 const router = express.Router();
@@ -16,7 +15,7 @@ const cloudinary = require('../utils/cloudinary');
 const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754102481/022e3445-0819-4ebc-962a-d9f0d772bf86_kmyqbw.jpg';
 const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754170886/D1_Logo_l5rfzk.jpg';
 
-/* ========= Helper seguro para descargar binarios ========= */
+// Descarga binarios de forma segura
 async function safeGetBuffer(url) {
   if (!url || typeof url !== 'string') return null;
   try {
@@ -28,7 +27,7 @@ async function safeGetBuffer(url) {
   }
 }
 
-/* ========= Helper: dibujar imagen centrada en una caja ========= */
+// Dibuja imagen centrada en una caja
 function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
   const img = doc.openImage(imgBuffer);
   const iw = img.width || 1;
@@ -45,15 +44,13 @@ function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
   const { tiendaId } = req.query;
-  let ubicacion = req.query.ubicacion || 'Sitio no especificado';
+  const wantsJson = req.query.format === 'json' || (req.get('accept') || '').includes('application/json');
 
-  // Enriquecer ubicación con datos de la tienda
+  let ubicacion = req.query.ubicacion || 'Sitio no especificado';
   if (tiendaId) {
     try {
       const tienda = await Tienda.findById(tiendaId);
-      if (tienda) {
-        ubicacion = `${tienda.nombre} - ${tienda.departamento}, ${tienda.ciudad}`;
-      }
+      if (tienda) ubicacion = `${tienda.nombre} - ${tienda.departamento}, ${tienda.ciudad}`;
     } catch (e) {
       console.warn('No se pudo obtener la tienda para el PDF:', e?.message || e);
     }
@@ -65,13 +62,24 @@ router.get('/generar/:sesionId', async (req, res) => {
   const pdfImagenesPath = path.join(tempDir, `pdf-imagenes-${sesionId}.pdf`);
   const pdfFinalPath = path.join(tempDir, `pdf-final-${sesionId}.pdf`);
 
+  // Limpia archivos temporales
+  const cleanupTemps = () => {
+    try {
+      if (fs.existsSync(pdfImagenesPath)) fs.unlinkSync(pdfImagenesPath);
+      if (fs.existsSync(pdfFinalPath)) fs.unlinkSync(pdfFinalPath);
+      const maybeActaImgsPath = path.join(tempDir, `acta-imgs-${sesionId}.pdf`);
+      if (fs.existsSync(maybeActaImgsPath)) fs.unlinkSync(maybeActaImgsPath);
+    } catch (e) {
+      console.warn('No se pudo limpiar temporales:', e?.message || e);
+    }
+  };
+
   try {
     const imagenes = await Imagen.find({ sesionId }).sort({ fechaSubida: 1 });
     if (imagenes.length === 0) {
       return res.status(404).send('No hay imágenes para esta sesión');
     }
 
-    // 1) PDF con imágenes de evidencia (previa/posterior)
     await new Promise(async (resolve) => {
       const doc = new PDFDocument({ margin: 50 });
       const stream = fs.createWriteStream(pdfImagenesPath);
@@ -83,14 +91,11 @@ router.get('/generar/:sesionId', async (req, res) => {
         timeZone: 'America/Bogota'
       });
 
-      // Logos
       const logoCubicaBuf = await safeGetBuffer(LOGO_CUBICA_URL);
       if (logoCubicaBuf) doc.image(logoCubicaBuf, doc.page.width - 150, 40, { width: 120 });
-
       const logoD1Buf = await safeGetBuffer(LOGO_D1_URL);
       if (logoD1Buf) doc.image(logoD1Buf, 50, 40, { width: 100 });
 
-      // Títulos
       doc.fillColor('black').fontSize(24).text('Informe Técnico', 50, 100, { align: 'center' });
       doc.moveDown();
       doc.fontSize(14).text(ubicacion, { align: 'center' });
@@ -100,14 +105,12 @@ router.get('/generar/:sesionId', async (req, res) => {
       doc.fontSize(10).fillColor('gray')
         .text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', { align: 'center', lineGap: 2 });
 
-      // Pares de imágenes
       const previas = imagenes.filter(img => img.tipo === 'previa');
       const posteriores = imagenes.filter(img => img.tipo === 'posterior');
       const pares = [];
       const minLength = Math.min(previas.length, posteriores.length);
       for (let i = 0; i < minLength; i++) pares.push({ previa: previas[i], posterior: posteriores[i] });
 
-      // Caja de dibujo por imagen
       const boxW = 220;
       const boxH = 160;
       const gapX = 60;
@@ -116,33 +119,24 @@ router.get('/generar/:sesionId', async (req, res) => {
 
       for (let i = 0; i < pares.length; i++) {
         const { previa, posterior } = pares[i];
-
         const previaBuf = await safeGetBuffer(previa?.url);
         const posteriorBuf = await safeGetBuffer(posterior?.url);
-        if (!previaBuf || !posteriorBuf) {
-          console.warn('Se omite un par por URL inválida/indescargable');
-          continue;
-        }
+        if (!previaBuf || !posteriorBuf) continue;
 
-        // Caja izquierda y derecha
         const leftX = startX;
         const rightX = startX + boxW + gapX;
 
-        // Dibuja centrado en la caja
         centerImageInBox(doc, previaBuf, leftX, y, boxW, boxH);
         centerImageInBox(doc, posteriorBuf, rightX, y, boxW, boxH);
 
-        // Etiquetas bajo la caja, no bajo el alto dibujado
         const labelsY = y + boxH + 5;
         doc.fontSize(11).fillColor('#003366')
           .text('Antes de la instalación', leftX, labelsY, { width: boxW, align: 'center' })
           .text('Después de la instalación', rightX, labelsY, { width: boxW, align: 'center' });
 
-        // Observaciones
         doc.fontSize(9).fillColor('gray');
         const obsY = labelsY + 20;
         let maxObsHeight = 0;
-
         if (previa.observacion) {
           const h = doc.heightOfString(previa.observacion, { width: boxW });
           doc.text(previa.observacion, leftX, obsY, { width: boxW, align: 'center' });
@@ -154,15 +148,11 @@ router.get('/generar/:sesionId', async (req, res) => {
           maxObsHeight = Math.max(maxObsHeight, h);
         }
 
-        // Línea divisoria
         const lineaY = obsY + maxObsHeight + 10;
         doc.moveTo(startX, lineaY).lineTo(startX + boxW * 2 + gapX, lineaY)
           .strokeColor('#cccccc').lineWidth(0.5).stroke();
 
-        // Avance vertical
         y = lineaY + 20;
-
-        // Salto de página cada 2 pares
         if ((i + 1) % 2 === 0 && i !== pares.length - 1) {
           doc.addPage();
           y = doc.y;
@@ -173,7 +163,6 @@ router.get('/generar/:sesionId', async (req, res) => {
       stream.on('finish', resolve);
     });
 
-    // 2) Fusionar con acta si existe (PDF y/o IMÁGENES)
     const merger = new PDFMerger();
     await merger.add(pdfImagenesPath);
 
@@ -184,7 +173,6 @@ router.get('/generar/:sesionId', async (req, res) => {
     let hadActaPdf = false;
     let hadActaImgs = false;
 
-    // 2.a) Adjuntar ACTA en PDF si existe
     if (actaUrl) {
       const actaPath = path.join(tempDir, `acta-${sesionId}.pdf`);
       try {
@@ -197,11 +185,8 @@ router.get('/generar/:sesionId', async (req, res) => {
           console.warn(`El acta para ${sesionId} no es un PDF válido o no se pudo descargar`);
         }
         if (actaPublicId) {
-          try {
-            await cloudinary.uploader.destroy(actaPublicId, { resource_type: 'raw' });
-          } catch (e) {
-            console.warn('No se pudo borrar acta (PDF) en Cloudinary:', e?.message || e);
-          }
+          try { await cloudinary.uploader.destroy(actaPublicId, { resource_type: 'raw' }); }
+          catch (e) { console.warn('No se pudo borrar acta (PDF) en Cloudinary:', e?.message || e); }
         }
       } finally {
         if (fs.existsSync(actaPath)) fs.unlinkSync(actaPath);
@@ -210,14 +195,12 @@ router.get('/generar/:sesionId', async (req, res) => {
       }
     }
 
-    // 2.b) Adjuntar ACTA en IMÁGENES si existen
     const actaImgsArray = Array.isArray(store?.imagenes) ? store.imagenes : [];
     let actaImgsPath = null;
     const actaImgsPublicIds = [];
 
     if (actaImgsArray.length > 0) {
       actaImgsPath = path.join(tempDir, `acta-imgs-${sesionId}.pdf`);
-
       await new Promise(async (resolve) => {
         const doc = new PDFDocument({ autoFirstPage: false, margin: 40 });
         const stream = fs.createWriteStream(actaImgsPath);
@@ -226,17 +209,12 @@ router.get('/generar/:sesionId', async (req, res) => {
         for (const it of actaImgsArray) {
           const imgBuf = await safeGetBuffer(it?.url);
           if (!imgBuf) continue;
-
-          // Página y caja de contenido
           doc.addPage();
           const boxX = doc.page.margins.left;
           const boxY = doc.page.margins.top;
           const boxW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
           const boxH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
-
-          // Centrado en página
           centerImageInBox(doc, imgBuf, boxX, boxY, boxW, boxH);
-
           if (it?.public_id) actaImgsPublicIds.push(it.public_id);
         }
 
@@ -250,21 +228,15 @@ router.get('/generar/:sesionId', async (req, res) => {
       }
     }
 
-    // Guardar fusión (evidencias + acta PDF + acta imágenes)
     await merger.save(pdfFinalPath);
 
-    // Borrar imágenes del acta en Cloudinary después de generar el PDF final
     if (actaImgsPublicIds.length > 0) {
       for (const pid of actaImgsPublicIds) {
-        try {
-          await cloudinary.uploader.destroy(pid, { resource_type: 'image' });
-        } catch (e) {
-          console.warn('No se pudo borrar imagen de acta en Cloudinary:', pid, e?.message || e);
-        }
+        try { await cloudinary.uploader.destroy(pid, { resource_type: 'image' }); }
+        catch (e) { console.warn('No se pudo borrar imagen de acta en Cloudinary:', pid, e?.message || e); }
       }
     }
 
-    // Limpiar del buffer en memoria las imágenes del acta
     if (store && Array.isArray(store.imagenes)) {
       store.imagenes = [];
       if (!store.acta || store.acta === null) {
@@ -272,10 +244,11 @@ router.get('/generar/:sesionId', async (req, res) => {
       }
     }
 
-    // 3) Guardar en Cloudinary + Mongo mediante el servicio
+    // Sube a Cloudinary + guarda en Mongo. Debe devolver metadata con url.
+    let uploadMeta = null;
     try {
       const finalBuffer = fs.readFileSync(pdfFinalPath);
-      await guardarInforme({
+      uploadMeta = await guardarInforme({
         title: `Informe técnico ${sesionId}`,
         sesionId,
         buffer: finalBuffer,
@@ -285,34 +258,52 @@ router.get('/generar/:sesionId', async (req, res) => {
       console.error(`Error guardando informe ${sesionId}:`, err);
     }
 
-    // 4) Enviar al cliente y limpiar temporales
-    res.download(pdfFinalPath, `informe_tecnico_${sesionId}.pdf`, () => {
-      if (fs.existsSync(pdfImagenesPath)) fs.unlinkSync(pdfImagenesPath);
-      if (fs.existsSync(pdfFinalPath)) fs.unlinkSync(pdfFinalPath);
-      const maybeActaImgsPath = path.join(tempDir, `acta-imgs-${sesionId}.pdf`);
-      if (fs.existsSync(maybeActaImgsPath)) fs.unlinkSync(maybeActaImgsPath);
-    });
+    // Modo JSON: devuelve la URL final de Cloudinary
+    if (wantsJson) {
+      cleanupTemps();
 
-    // 5) Limpieza de imágenes de evidencia
+      const cloudUrl =
+        uploadMeta?.url ||
+        uploadMeta?.secure_url ||
+        uploadMeta?.cloudinary?.secure_url ||
+        null;
+
+      if (!cloudUrl) {
+        return res.status(500).json({ error: 'No se obtuvo URL del informe en Cloudinary' });
+      }
+
+      return res.status(201).json({
+        url: cloudUrl,
+        public_id: uploadMeta?.public_id || uploadMeta?.cloudinary?.public_id || null,
+        version: uploadMeta?.version || uploadMeta?.cloudinary?.version || null,
+        includesActa: hadActaPdf || hadActaImgs,
+        sesionId,
+        tiendaId: tiendaId || null,
+        ubicacion
+      });
+    }
+
+    // Modo descarga: envía el archivo
+    res.download(pdfFinalPath, `informe_tecnico_${sesionId}.pdf`, () => cleanupTemps());
+
+    // Limpieza de evidencias
     for (const img of imagenes) {
       const publicId = getPublicIdFromUrl(img.url);
       if (publicId) {
-        try {
-          await cloudinary.uploader.destroy(publicId);
-        } catch (err) {
-          console.warn(`No se pudo eliminar ${publicId} de Cloudinary:`, err?.message || err);
-        }
+        try { await cloudinary.uploader.destroy(publicId); }
+        catch (err) { console.warn(`No se pudo eliminar ${publicId} de Cloudinary:`, err?.message || err); }
       }
     }
     await Imagen.deleteMany({ sesionId });
 
   } catch (err) {
     console.error('Error al generar PDF:', err);
+    cleanupTemps();
     res.status(500).send('Error al generar el PDF');
   }
 });
 
-// Utilidad: extrae publicId desde una URL de Cloudinary (evidencias)
+// Extrae publicId desde URL de Cloudinary (evidencias)
 function getPublicIdFromUrl(url) {
   const match = (url || '').match(/\/v\d+\/(.+)\.(jpg|png|jpeg)/);
   return match ? match[1] : null;
