@@ -41,6 +41,97 @@ function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
   return { drawX, drawY, drawW, drawH };
 }
 
+// Extrae publicId desde URL de Cloudinary (evidencias)
+function getPublicIdFromUrl(url) {
+  const match = (url || '').match(/\/v\d+\/(.+)\.(jpg|png|jpeg)/);
+  return match ? match[1] : null;
+}
+
+// Limpia archivos temporales por sesionId
+function cleanupTempsBySession(sesionId) {
+  try {
+    const tempDir = path.join(__dirname, '../uploads/temp');
+    const toDelete = [
+      path.join(tempDir, `pdf-imagenes-${sesionId}.pdf`),
+      path.join(tempDir, `pdf-final-${sesionId}.pdf`),
+      path.join(tempDir, `acta-${sesionId}.pdf`),
+      path.join(tempDir, `acta-imgs-${sesionId}.pdf`)
+    ];
+    for (const p of toDelete) { if (fs.existsSync(p)) fs.unlinkSync(p); }
+  } catch (e) {
+    console.warn('No se pudo limpiar temporales por sesión:', sesionId, e?.message || e);
+  }
+}
+
+// Destruye un recurso en Cloudinary con control de tipo
+async function destroyCloudinary(publicId, resourceType) {
+  try {
+    if (!publicId) return { ok: false, error: 'publicId vacío' };
+    const res = await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+    return { ok: true, res };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+/* =========================================================
+   NUEVA RUTA: reset de sesión (barrer evidencias y acta)
+   Uso previsto desde el front al "Reiniciar flujo" o "Cerrar sesión"
+   POST /pdf/session/reset/:sesionId
+   Respuesta: { ok:true, deleted:{imagenesN, actaPdf, actaImgsN} }
+========================================================= */
+router.post('/session/reset/:sesionId', async (req, res) => {
+  const { sesionId } = req.params;
+  if (!sesionId || typeof sesionId !== 'string') {
+    return res.status(400).json({ ok: false, error: 'sesionId inválido' });
+  }
+
+  const deleted = { imagenesN: 0, actaPdf: false, actaImgsN: 0 };
+  try {
+    // 1) Evidencias: borrar en Cloudinary y Mongo
+    const imagenes = await Imagen.find({ sesionId }).lean();
+    for (const img of imagenes) {
+      const pid = getPublicIdFromUrl(img?.url);
+      if (pid) {
+        const r = await destroyCloudinary(pid, 'image');
+        if (!r.ok) console.warn('No se pudo borrar evidencia en Cloudinary:', pid, r.error);
+      }
+    }
+    if (imagenes.length > 0) {
+      await Imagen.deleteMany({ sesionId });
+      deleted.imagenesN = imagenes.length;
+    }
+
+    // 2) Acta en memoria: PDF y/o imágenes
+    const store = actasEnMemoria[sesionId];
+    if (store && typeof store === 'object') {
+      if (store.acta && store.acta.public_id) {
+        const r = await destroyCloudinary(store.acta.public_id, 'raw');
+        if (!r.ok) console.warn('No se pudo borrar acta (PDF) en Cloudinary:', store.acta.public_id, r.error);
+        deleted.actaPdf = true;
+      }
+      if (Array.isArray(store.imagenes) && store.imagenes.length > 0) {
+        for (const it of store.imagenes) {
+          if (it?.public_id) {
+            const r = await destroyCloudinary(it.public_id, 'image');
+            if (!r.ok) console.warn('No se pudo borrar imagen de acta en Cloudinary:', it.public_id, r.error);
+            deleted.actaImgsN += 1;
+          }
+        }
+      }
+      delete actasEnMemoria[sesionId];
+    }
+
+    // 3) Limpiar temporales locales
+    cleanupTempsBySession(sesionId);
+
+    return res.status(200).json({ ok: true, deleted });
+  } catch (e) {
+    console.error('Error en reset de sesión:', sesionId, e?.message || e);
+    return res.status(500).json({ ok: false, error: 'Error interno al resetear sesión' });
+  }
+});
+
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
   const { tiendaId } = req.query;
@@ -192,7 +283,7 @@ router.get('/generar/:sesionId', async (req, res) => {
     let hadActaImgs = false;
 
     if (actaUrl) {
-      const actaPath = path.join(tempDir, `acta-${sesionId}.pdf`);
+      const actaPath = path.join(__dirname, '../uploads/temp', `acta-${sesionId}.pdf`);
       try {
         const actaBuf = await safeGetBuffer(actaUrl);
         if (actaBuf && actaBuf.slice(0, 4).toString('utf8') === '%PDF') {
@@ -218,7 +309,7 @@ router.get('/generar/:sesionId', async (req, res) => {
     const actaImgsPublicIds = [];
 
     if (actaImgsArray.length > 0) {
-      actaImgsPath = path.join(tempDir, `acta-imgs-${sesionId}.pdf`);
+      actaImgsPath = path.join(__dirname, '../uploads/temp', `acta-imgs-${sesionId}.pdf`);
       await new Promise(async (resolve) => {
         const doc = new PDFDocument({ autoFirstPage: false, margin: 40 });
         const stream = fs.createWriteStream(actaImgsPath);
@@ -285,16 +376,14 @@ router.get('/generar/:sesionId', async (req, res) => {
         uploadMeta?.url ||
         uploadMeta?.secure_url ||
         uploadMeta?.cloudinary?.secure_url ||
-        uploadMeta?.informe?.url || // fallback si servicio guarda y retorna doc
+        uploadMeta?.informe?.url ||
         null;
 
       if (!cloudUrl) {
-        // Limpia evidencias en background aunque haya fallo de URL
         setImmediate(() => cleanupEvidencesAsync(imagenes));
         return res.status(500).json({ ok: false, error: 'No se obtuvo URL del informe en Cloudinary' });
       }
 
-      // Limpia evidencias en background y responde
       setImmediate(() => cleanupEvidencesAsync(imagenes));
 
       return res.status(201).json({
@@ -323,11 +412,5 @@ router.get('/generar/:sesionId', async (req, res) => {
     res.status(500).send('Error al generar el PDF');
   }
 });
-
-// Extrae publicId desde URL de Cloudinary (evidencias)
-function getPublicIdFromUrl(url) {
-  const match = (url || '').match(/\/v\d+\/(.+)\.(jpg|png|jpeg)/);
-  return match ? match[1] : null;
-}
 
 module.exports = router;
