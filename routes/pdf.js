@@ -12,10 +12,60 @@ const Tienda = require('../models/tienda');
 const { guardarInforme } = require('../services/informeService');
 const cloudinary = require('../utils/cloudinary');
 
+// URLs originales de logos (se transformarán a la hora de descargar)
 const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754102481/022e3445-0819-4ebc-962a-d9f0d772bf86_kmyqbw.jpg';
 const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754170886/D1_Logo_l5rfzk.jpg';
 
-// Descarga binarios de forma segura
+
+function isCloudinaryUrl(url) {
+  return typeof url === 'string' && /res\.cloudinary\.com/.test(url);
+}
+
+// Inserta transformaciones si la URL es de Cloudinary y no tiene ya transforms
+function insertTransformInCloudinaryUrl(url, transformStr) {
+  try {
+    if (!isCloudinaryUrl(url)) return url;
+    const UPLOAD_SEGMENT = '/upload/';
+    const idx = url.indexOf(UPLOAD_SEGMENT);
+    if (idx === -1) return url;
+
+    // Detectar si ya hay transformaciones: si el segmento inmediato tras 'upload/' NO comienza con 'v'
+    const afterUpload = url.slice(idx + UPLOAD_SEGMENT.length);
+    const alreadyHasTransforms = !afterUpload.startsWith('v');
+
+    if (alreadyHasTransforms) {
+      // Ya tiene transformaciones, devolver tal cual para no romper intenciones previas
+      return url;
+    }
+
+    // Insertar transformaciones entre '/upload/' y 'v...'
+    const before = url.slice(0, idx + UPLOAD_SEGMENT.length);
+    const after = url.slice(idx + UPLOAD_SEGMENT.length);
+    return `${before}${transformStr}/${after}`;
+  } catch {
+    return url;
+  }
+}
+
+// Transformación recomendada para incrustar en PDF: JPG, calidad 75 y ancho 1600
+function buildTransformedUrl(url) {
+  // Para fotos del informe: formato JPG, calidad 75, ancho 1600
+  const transform = 'f_jpg,q_75,w_1600';
+  return insertTransformInCloudinaryUrl(url, transform);
+}
+
+// Transformación para logos (más pequeños)
+function buildLogoUrl(url) {
+  // Logos pequeños, ancho 400 y calidad auto
+  const transform = 'f_png,q_auto,w_400';
+  return insertTransformInCloudinaryUrl(url, transform);
+}
+
+/* -----------------------------------------------------------
+   Descarga binaria segura (respeta transformaciones cuando ya
+   vienen en la URL; si necesitamos transformar, pasamos antes
+   por buildTransformedUrl o buildLogoUrl)
+----------------------------------------------------------- */
 async function safeGetBuffer(url) {
   if (!url || typeof url !== 'string') return null;
   try {
@@ -27,7 +77,9 @@ async function safeGetBuffer(url) {
   }
 }
 
-// Dibuja imagen centrada en una caja
+/* -----------------------------------------------------------
+   Dibuja imagen centrada en una caja (sin cambios funcionales)
+----------------------------------------------------------- */
 function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
   const img = doc.openImage(imgBuffer);
   const iw = img.width || 1;
@@ -41,13 +93,18 @@ function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
   return { drawX, drawY, drawW, drawH };
 }
 
-// Extrae publicId desde URL de Cloudinary (evidencias)
+/* -----------------------------------------------------------
+   Extrae publicId desde URL de Cloudinary (más extensiones)
+----------------------------------------------------------- */
 function getPublicIdFromUrl(url) {
-  const match = (url || '').match(/\/v\d+\/(.+)\.(jpg|png|jpeg)/);
+  // Extensiones ampliadas: jpg|png|jpeg|webp|gif|heic|heif|bmp|tif|tiff
+  const match = (url || '').match(/\/v\d+\/(.+)\.(jpg|png|jpeg|webp|gif|heic|heif|bmp|tif|tiff)/i);
   return match ? match[1] : null;
 }
 
-// Limpia archivos temporales por sesionId
+/* -----------------------------------------------------------
+   Limpia archivos temporales por sesión (sin cambios funcionales)
+----------------------------------------------------------- */
 function cleanupTempsBySession(sesionId) {
   try {
     const tempDir = path.join(__dirname, '../uploads/temp');
@@ -63,7 +120,9 @@ function cleanupTempsBySession(sesionId) {
   }
 }
 
-// Destruye un recurso en Cloudinary con control de tipo
+/* -----------------------------------------------------------
+   Destruye recurso en Cloudinary con control de tipo
+----------------------------------------------------------- */
 async function destroyCloudinary(publicId, resourceType) {
   try {
     if (!publicId) return { ok: false, error: 'publicId vacío' };
@@ -76,9 +135,6 @@ async function destroyCloudinary(publicId, resourceType) {
 
 /* =========================================================
    NUEVA RUTA: reset de sesión (barrer evidencias y acta)
-   Uso previsto desde el front al "Reiniciar flujo" o "Cerrar sesión"
-   POST /pdf/session/reset/:sesionId
-   Respuesta: { ok:true, deleted:{imagenesN, actaPdf, actaImgsN} }
 ========================================================= */
 router.post('/session/reset/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
@@ -132,11 +188,18 @@ router.post('/session/reset/:sesionId', async (req, res) => {
   }
 });
 
+/* =========================================================
+   Generación del PDF
+   - Descarga imágenes de evidencias y acta con transformaciones
+   - Fusiona con acta
+   - Sube PDF final
+========================================================= */
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
   const { tiendaId } = req.query;
   const wantsJson = req.query.format === 'json' || (req.get('accept') || '').includes('application/json');
 
+  // Determinar ubicación (sin cambios)
   let ubicacion = req.query.ubicacion || 'Sitio no especificado';
   if (tiendaId) {
     try {
@@ -147,13 +210,14 @@ router.get('/generar/:sesionId', async (req, res) => {
     }
   }
 
+  // Directorio temporal (sin cambios)
   const tempDir = path.join(__dirname, '../uploads/temp');
   if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
   const pdfImagenesPath = path.join(tempDir, `pdf-imagenes-${sesionId}.pdf`);
   const pdfFinalPath = path.join(tempDir, `pdf-final-${sesionId}.pdf`);
 
-  // Limpia archivos temporales
+  // Limpieza de temporales (sin cambios)
   const cleanupTemps = () => {
     try {
       if (fs.existsSync(pdfImagenesPath)) fs.unlinkSync(pdfImagenesPath);
@@ -165,13 +229,13 @@ router.get('/generar/:sesionId', async (req, res) => {
     }
   };
 
-  // Limpia evidencias (Cloudinary + Mongo) en background
+  // Limpieza de evidencias en background (resource_type explícito)
   const cleanupEvidencesAsync = async (imagenes) => {
     try {
       for (const img of imagenes || []) {
         const publicId = getPublicIdFromUrl(img.url);
         if (publicId) {
-          try { await cloudinary.uploader.destroy(publicId); }
+          try { await cloudinary.uploader.destroy(publicId, { resource_type: 'image' }); }
           catch (err) { console.warn(`No se pudo eliminar ${publicId} de Cloudinary:`, err?.message || err); }
         }
       }
@@ -187,7 +251,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       return res.status(404).send('No hay imágenes para esta sesión');
     }
 
-    // 1) PDF de evidencias
+    // 1) PDF de evidencias con imágenes transformadas
     await new Promise(async (resolve) => {
       const doc = new PDFDocument({ margin: 50 });
       const stream = fs.createWriteStream(pdfImagenesPath);
@@ -199,9 +263,11 @@ router.get('/generar/:sesionId', async (req, res) => {
         timeZone: 'America/Bogota'
       });
 
-      const logoCubicaBuf = await safeGetBuffer(LOGO_CUBICA_URL);
+      // Logos con transformación más ligera
+      const logoCubicaBuf = await safeGetBuffer(buildLogoUrl(LOGO_CUBICA_URL));
       if (logoCubicaBuf) doc.image(logoCubicaBuf, doc.page.width - 150, 40, { width: 120 });
-      const logoD1Buf = await safeGetBuffer(LOGO_D1_URL);
+
+      const logoD1Buf = await safeGetBuffer(buildLogoUrl(LOGO_D1_URL));
       if (logoD1Buf) doc.image(logoD1Buf, 50, 40, { width: 100 });
 
       doc.fillColor('black').fontSize(24).text('Informe Técnico', 50, 100, { align: 'center' });
@@ -227,8 +293,13 @@ router.get('/generar/:sesionId', async (req, res) => {
 
       for (let i = 0; i < pares.length; i++) {
         const { previa, posterior } = pares[i];
-        const previaBuf = await safeGetBuffer(previa?.url);
-        const posteriorBuf = await safeGetBuffer(posterior?.url);
+
+        // Descargar versiones transformadas para optimizar peso final del PDF
+        const previaUrl = isCloudinaryUrl(previa?.url) ? buildTransformedUrl(previa.url) : previa?.url;
+        const posteriorUrl = isCloudinaryUrl(posterior?.url) ? buildTransformedUrl(posterior.url) : posterior?.url;
+
+        const previaBuf = await safeGetBuffer(previaUrl);
+        const posteriorBuf = await safeGetBuffer(posteriorUrl);
         if (!previaBuf || !posteriorBuf) continue;
 
         const leftX = startX;
@@ -316,14 +387,18 @@ router.get('/generar/:sesionId', async (req, res) => {
         doc.pipe(stream);
 
         for (const it of actaImgsArray) {
-          const imgBuf = await safeGetBuffer(it?.url);
+          // Imágenes del acta también en versión transformada para aligerar el PDF
+          const imgUrl = isCloudinaryUrl(it?.url) ? buildTransformedUrl(it.url) : it?.url;
+          const imgBuf = await safeGetBuffer(imgUrl);
           if (!imgBuf) continue;
+
           doc.addPage();
           const boxX = doc.page.margins.left;
           const boxY = doc.page.margins.top;
           const boxW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
           const boxH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
           centerImageInBox(doc, imgBuf, boxX, boxY, boxW, boxH);
+
           if (it?.public_id) actaImgsPublicIds.push(it.public_id);
         }
 
@@ -354,7 +429,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       }
     }
 
-    // 3) Sube a Cloudinary + guarda en Mongo. Debe devolver metadata con url.
+    // 3) Subir PDF a Cloudinary + guardar en Mongo
     let uploadMeta = null;
     try {
       const finalBuffer = fs.readFileSync(pdfFinalPath);
@@ -397,7 +472,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       });
     }
 
-    // Modo descarga: envía el archivo y limpia al terminar (incluye evidencias)
+    // Modo descarga directa
     res.download(pdfFinalPath, `informe_tecnico_${sesionId}.pdf`, () => {
       cleanupTemps();
       setImmediate(() => cleanupEvidencesAsync(imagenes));
