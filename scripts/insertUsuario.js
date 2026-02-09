@@ -12,7 +12,7 @@
  *   FORCE_PASSWORD_RESET=1 node scripts/insertUsuario_79965598.js
  */
 
-/*const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -33,8 +33,8 @@ for (const p of envCandidates) {
 // Ajusta la ruta si tu estructura difiere
 const UsuarioUnico = require('../models/UsuarioUnico');
 
-const CEDULA = '79965598';
-const NOMBRE = 'JOHN HORACIO VERGARA GUTIERREZ';
+const CEDULA = '1031179686';
+const NOMBRE = 'JUAN SEBASTIAN PASTRANA ALMANZA';
 
 // URL de Mongo desde .env
 const mongoUri =
@@ -106,4 +106,4 @@ const SHARED_PASSWORD = process.env.SHARED_PASSWORD || process.env.SHARED_USER_P
   console.error('ERROR:', err);
   try { await mongoose.disconnect(); } catch {}
   process.exit(1);
-});*/
+});

@@ -16,7 +16,6 @@ const cloudinary = require('../utils/cloudinary');
 const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754102481/022e3445-0819-4ebc-962a-d9f0d772bf86_kmyqbw.jpg';
 const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754170886/D1_Logo_l5rfzk.jpg';
 
-
 function isCloudinaryUrl(url) {
   return typeof url === 'string' && /res\.cloudinary\.com/.test(url);
 }
@@ -199,6 +198,9 @@ router.get('/generar/:sesionId', async (req, res) => {
   const { tiendaId } = req.query;
   const wantsJson = req.query.format === 'json' || (req.get('accept') || '').includes('application/json');
 
+  // Número de incidencia
+  const numeroIncidencia = (req.query.numeroIncidencia || '').toString().trim();
+
   // Determinar ubicación (sin cambios)
   let ubicacion = req.query.ubicacion || 'Sitio no especificado';
   if (tiendaId) {
@@ -273,8 +275,21 @@ router.get('/generar/:sesionId', async (req, res) => {
       doc.fillColor('black').fontSize(24).text('Informe Técnico', 50, 100, { align: 'center' });
       doc.moveDown();
       doc.fontSize(14).text(ubicacion, { align: 'center' });
+
       doc.moveDown(0.5);
       doc.fontSize(12).text(`Generado: ${fechaActual}`, { align: 'center' });
+
+      // Incidencia debajo de "Generado"
+      if (numeroIncidencia) {
+        const raw = numeroIncidencia.toString().trim();
+        const onlyDigits = (raw.match(/\d+/g) || []).join('');
+        const display = onlyDigits || raw;
+
+        doc.moveDown(0.3);
+        doc.fontSize(12).fillColor('black')
+          .text(`Incidencia ${display}`, { align: 'center' });
+      }
+
       doc.moveDown(2);
       doc.fontSize(10).fillColor('gray')
         .text('Este informe contiene evidencia fotográfica del antes y después de la instalación.', { align: 'center', lineGap: 2 });
@@ -437,7 +452,8 @@ router.get('/generar/:sesionId', async (req, res) => {
         title: `Informe técnico ${sesionId}`,
         sesionId,
         buffer: finalBuffer,
-        includesActa: hadActaPdf || hadActaImgs
+        includesActa: hadActaPdf || hadActaImgs,
+        numeroIncidencia
       });
     } catch (err) {
       console.error(`Error guardando informe ${sesionId}:`, err);
@@ -468,7 +484,8 @@ router.get('/generar/:sesionId', async (req, res) => {
         includesActa: hadActaPdf || hadActaImgs,
         sesionId,
         tiendaId: tiendaId || null,
-        ubicacion
+        ubicacion,
+        numeroIncidencia: numeroIncidencia || ''
       });
     }
 

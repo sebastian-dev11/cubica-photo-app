@@ -26,6 +26,7 @@ function esPDF(buffer) {
  * @param {String|null} [params.sesionId=null] ID de sesión para buscar el usuario (opcional)
  * @param {Buffer} params.buffer            Contenido binario del PDF (obligatorio)
  * @param {Boolean} [params.includesActa=false]  Indica si incluye acta
+ * @param {String} [params.numeroIncidencia='']  Número de incidencia (opcional)
  * @param {Boolean} [params.overwrite=false]     Si true, permite sobreescritura en Cloudinary
  * @returns {Promise<Informe>} Documento guardado en MongoDB
  */
@@ -35,6 +36,7 @@ async function guardarInforme({
   sesionId = null,
   buffer,
   includesActa = false,
+  numeroIncidencia = '',
   overwrite = false
 }) {
   if (!title) throw new Error('El título es obligatorio.');
@@ -74,6 +76,7 @@ async function guardarInforme({
             url: result.secure_url,
             publicId: result.public_id,
             mimeType: 'application/pdf',
+            numeroIncidencia,
             includesActa
           });
           resolve(informe);
@@ -92,7 +95,7 @@ async function guardarInforme({
   });
 }
 
-/* 
+/*
    ELIMINACIÓN DE INFORMES
 */
 
