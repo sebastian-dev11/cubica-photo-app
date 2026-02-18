@@ -22,6 +22,9 @@ const informeSchema = new mongoose.Schema({
   // Número de incidencia
   numeroIncidencia: { type: String, trim: true, default: '' },
 
+  // Regional del informe
+  regional: { type: String, default: 'OTRA' },
+
   // Fecha de creación
   createdAt: { type: Date, default: Date.now }
 });

@@ -175,6 +175,7 @@ router.get('/generar/:sesionId', async (req, res) => {
   // Determinar ubicacion y regional desde la BD
   let ubicacion = req.query.ubicacion || 'Sitio no especificado';
   let regionalStr = ''; 
+  let regionalBd = 'OTRA';
   
   if (tiendaId) {
     try {
@@ -184,6 +185,7 @@ router.get('/generar/:sesionId', async (req, res) => {
         ubicacion = `${tienda.nombre} - ${tienda.departamento}, ${tienda.ciudad}`;
         // Extraemos la regional
         regionalStr = `Regional: ${tienda.regional}`;
+        regionalBd = tienda.regional;
       }
     } catch (e) {
       console.warn('No se pudo obtener la tienda para el PDF:', e?.message || e);
@@ -433,7 +435,8 @@ router.get('/generar/:sesionId', async (req, res) => {
         sesionId,
         buffer: finalBuffer,
         includesActa: hadActaPdf || hadActaImgs,
-        numeroIncidencia
+        numeroIncidencia,
+        regional: regionalBd
       });
     } catch (err) {
       console.error(`Error guardando informe ${sesionId}:`, err);

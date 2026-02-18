@@ -52,17 +52,10 @@ function computeShareUrl(inf) {
 /* =========================
    GET /informes  (listado)
 ========================= */
-/**
- * Query params soportados:
- *  - page, limit
- *  - search (coincide en title o ubicacion, case-insensitive)
- *  - userId (filtra por generatedBy)
- *  - from, to (ISO 8601 o YYYY-MM-DD) — rango por createdAt [from, to)
- */
 router.get('/', async (req, res) => {
   try {
     const { page, limit } = sanitizePagination(req.query.page, req.query.limit);
-    const { search = '', userId, from, to } = req.query;
+    const { search = '', userId, from, to, regional = '', incidencia = '' } = req.query;
 
     const query = {};
 
@@ -70,6 +63,14 @@ router.get('/', async (req, res) => {
     if (search) {
       const rx = new RegExp(search, 'i');
       query.$or = [{ title: rx }, { ubicacion: rx }];
+    }
+
+    if (regional) {
+      query.regional = regional;
+    }
+    
+    if (incidencia) {
+      query.numeroIncidencia = { $regex: new RegExp(incidencia, 'i') };
     }
 
     // Filtro por usuario específico
