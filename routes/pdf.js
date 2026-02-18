@@ -172,12 +172,19 @@ router.get('/generar/:sesionId', async (req, res) => {
 
   const numeroIncidencia = (req.query.numeroIncidencia || '').toString().trim();
 
-  // Determinar ubicacion
+  // Determinar ubicacion y regional desde la BD
   let ubicacion = req.query.ubicacion || 'Sitio no especificado';
+  let regionalStr = ''; 
+  
   if (tiendaId) {
     try {
       const tienda = await Tienda.findById(tiendaId);
-      if (tienda) ubicacion = `${tienda.nombre} - ${tienda.regional} | ${tienda.departamento}, ${tienda.ciudad}`;
+      if (tienda) {
+        // Formato limpio de ubicación
+        ubicacion = `${tienda.nombre} - ${tienda.departamento}, ${tienda.ciudad}`;
+        // Extraemos la regional
+        regionalStr = `Regional: ${tienda.regional}`;
+      }
     } catch (e) {
       console.warn('No se pudo obtener la tienda para el PDF:', e?.message || e);
     }
@@ -242,11 +249,14 @@ router.get('/generar/:sesionId', async (req, res) => {
 
       doc.fillColor('black').fontSize(24).text('Informe Tecnico', 50, 100, { align: 'center' });
       doc.moveDown();
+      
+      // 1. Dibuja la ubicación
       doc.fontSize(14).text(ubicacion, { align: 'center' });
 
       doc.moveDown(0.5);
       doc.fontSize(12).text(`Generado: ${fechaActual}`, { align: 'center' });
 
+      // 2. Dibuja la Incidencia
       if (numeroIncidencia) {
         const raw = numeroIncidencia.toString().trim();
         const onlyDigits = (raw.match(/\d+/g) || []).join('');
@@ -254,7 +264,15 @@ router.get('/generar/:sesionId', async (req, res) => {
 
         doc.moveDown(0.3);
         doc.fontSize(12).fillColor('black')
-          .text(`Incidencia ${display}`, { align: 'center' });
+          .text(`Incidencia: ${display}`, { align: 'center' });
+      }
+
+      // 3. Dibuja la Regional (NUEVO)
+      if (regionalStr) {
+        doc.moveDown(0.3);
+        
+        doc.fontSize(12).fillColor('black')
+          .text(regionalStr, { align: 'center' });
       }
 
       doc.moveDown(2);
