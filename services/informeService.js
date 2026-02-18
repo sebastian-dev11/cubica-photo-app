@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const Informe = require('../models/informe');
-const Sesion = require('../models/sesion'); // Para mapear sesionId -> usuarioId (+ isAdmin)
+const Sesion = require('../models/sesion'); 
 const cloudinary = require('../utils/cloudinary');
 
 function slugify(str) {
@@ -16,20 +16,6 @@ function esPDF(buffer) {
   return buffer.slice(0, 4).toString() === '%PDF';
 }
 
-/**
- * Sube un informe PDF a Cloudinary y registra sus metadatos en MongoDB.
- * Si no se pasa generatedBy, intenta resolverlo desde el sesionId.
- *
- * @param {Object} params
- * @param {String} params.title             Título del informe (obligatorio)
- * @param {String|null} [params.generatedBy=null] ID del usuario (opcional)
- * @param {String|null} [params.sesionId=null] ID de sesión para buscar el usuario (opcional)
- * @param {Buffer} params.buffer            Contenido binario del PDF (obligatorio)
- * @param {Boolean} [params.includesActa=false]  Indica si incluye acta
- * @param {String} [params.numeroIncidencia='']  Número de incidencia (opcional)
- * @param {Boolean} [params.overwrite=false]     Si true, permite sobreescritura en Cloudinary
- * @returns {Promise<Informe>} Documento guardado en MongoDB
- */
 async function guardarInforme({
   title,
   generatedBy = null,
@@ -37,6 +23,7 @@ async function guardarInforme({
   buffer,
   includesActa = false,
   numeroIncidencia = '',
+  regional = 'OTRA', // <--- AHORA RECIBE LA REGIONAL
   overwrite = false
 }) {
   if (!title) throw new Error('El título es obligatorio.');
@@ -47,7 +34,6 @@ async function guardarInforme({
     throw new Error('El archivo no parece ser un PDF válido.');
   }
 
-  // Si no se pasa generatedBy, buscarlo desde la sesión
   if (!generatedBy && sesionId) {
     const sesion = await Sesion.findOne({ sesionId });
     generatedBy = sesion?.usuarioId || null;
@@ -55,7 +41,7 @@ async function guardarInforme({
 
   const baseId = slugify(title);
   const hash8 = crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 8);
-  const publicId = `${baseId}_${hash8}.pdf`; // ← extensión añadida
+  const publicId = `${baseId}_${hash8}.pdf`; 
 
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
@@ -64,7 +50,7 @@ async function guardarInforme({
         folder: 'informes',
         public_id: publicId,
         overwrite,
-        format: 'pdf' // ← asegura tipo
+        format: 'pdf' 
       },
       async (error, result) => {
         if (error) return reject(error);
@@ -77,7 +63,8 @@ async function guardarInforme({
             publicId: result.public_id,
             mimeType: 'application/pdf',
             numeroIncidencia,
-            includesActa
+            includesActa,
+            regional // <--- Y AHORA LA GUARDA EN LA BASE DE DATOS
           });
           resolve(informe);
         } catch (dbErr) {
@@ -95,15 +82,6 @@ async function guardarInforme({
   });
 }
 
-/*
-   ELIMINACIÓN DE INFORMES
-*/
-
-/**
- * Resuelve auth efectiva a partir de userId directo y/o sesionId:
- * - resolvedUserId: ID del usuario solicitante (si se puede determinar)
- * - isAdmin: true si viene forzado por parámetro o si la Sesion es admin
- */
 async function resolverAuth({ requesterUserId = null, requesterSesionId = null, isAdmin = false }) {
   let resolvedUserId = null;
   let admin = !!isAdmin;
@@ -118,18 +96,13 @@ async function resolverAuth({ requesterUserId = null, requesterSesionId = null, 
       resolvedUserId = sesion.usuarioId.toString();
     }
     if (!admin && sesion?.isAdmin) {
-      admin = true; // si la sesión marcada como admin, habilita bypass
+      admin = true; 
     }
   }
 
   return { resolvedUserId, isAdmin: admin };
 }
 
-/**
- * Verifica si el solicitante puede eliminar el informe.
- * - Admin: siempre puede.
- * - Usuario normal: debe coincidir con generatedBy.
- */
 function verificarAutorizacionEliminacion({ informe, resolvedUserId, isAdmin = false }) {
   if (isAdmin) return;
 
@@ -141,13 +114,6 @@ function verificarAutorizacionEliminacion({ informe, resolvedUserId, isAdmin = f
   }
 }
 
-/**
- * Elimina un informe:
- *  - Verifica autorización (propiedad o admin —admin puede todo).
- *  - Destruye el asset en Cloudinary (resource_type: 'raw').
- *  - Elimina el documento en Mongo.
- * @returns {Promise<{cloudResult: string}>}
- */
 async function eliminarInforme({
   id,
   requesterUserId = null,
@@ -167,7 +133,6 @@ async function eliminarInforme({
     throw err;
   }
 
-  // Resuelve userId e isAdmin efectivo (lee Sesion.isAdmin si llega sesionId)
   const { resolvedUserId, isAdmin: isAdminEff } = await resolverAuth({
     requesterUserId,
     requesterSesionId,
@@ -183,9 +148,8 @@ async function eliminarInforme({
         resource_type: 'raw',
         invalidate: true
       });
-      cloudResult = resp?.result || 'ok'; // 'ok' | 'not found' | ...
+      cloudResult = resp?.result || 'ok'; 
     } catch (e) {
-      // Para no dejar el registro huérfano, consideramos este error fatal
       const err = new Error(`Fallo al eliminar en Cloudinary: ${e?.message || e}`);
       err.status = 502;
       throw err;
@@ -196,10 +160,6 @@ async function eliminarInforme({
   return { cloudResult };
 }
 
-/**
- * Elimina varios informes.
- * Devuelve resumen con borrados y fallos.
- */
 async function eliminarInformesBulk({
   ids = [],
   requesterUserId = null,
