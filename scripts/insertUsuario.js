@@ -33,8 +33,8 @@ for (const p of envCandidates) {
 // Ajusta la ruta si tu estructura difiere
 const UsuarioUnico = require('../models/UsuarioUnico');
 
-const CEDULA = '1007396406';
-const NOMBRE = 'JOSÉ GALY CADENA ROJAS';
+const CEDULA = '1031169779';
+const NOMBRE = 'LEIDY ORTIZ';
 
 // URL de Mongo desde .env
 const mongoUri =
