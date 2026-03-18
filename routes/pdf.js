@@ -14,7 +14,7 @@ const cloudinary = require('../utils/cloudinary');
 
 // URLs de logos
 const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1773871245/LOGO_CUBICA_NUEVO_v3rsq5.jpg';
-const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1754170886/D1_Logo_l5rfzk.jpg';
+const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1773875275/D1_LOGO_NUEVO_kj1bdh.jpg';
 
 function isCloudinaryUrl(url) {
   return typeof url === 'string' && /res\.cloudinary\.com/.test(url);
