@@ -34,7 +34,7 @@ for (const p of envCandidates) {
 const Tienda = require('../models/tienda');
 
 // Datos de ejemplo (puedes editarlos o reemplazarlos por flags si quieres)
-const NOMBRE = 'FONTIBON FORETTI';
+const NOMBRE = 'APERTURA FACTORY';
 const REGIONAL = 'BOS'; // <--- NUEVO CAMPO AÑADIDO
 const DEPARTAMENTO = 'BOGOTA D.C';
 const CIUDAD = 'BOGOTA D.C';

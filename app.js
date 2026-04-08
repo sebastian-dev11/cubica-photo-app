@@ -16,8 +16,18 @@ const informesRoutes = require('./routes/informes');
 
 const app = express();
 
-// Middlewares
-app.use(cors());
+
+app.use(cors({
+  origin: [
+    'https://cubica-photo-frontend.vercel.app',
+    'http://localhost:3000',                    
+    'http://localhost:5173'                     
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-sesion-id'],
+  credentials: true
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
