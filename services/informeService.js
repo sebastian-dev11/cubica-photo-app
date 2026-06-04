@@ -23,7 +23,7 @@ async function guardarInforme({
   buffer,
   includesActa = false,
   numeroIncidencia = '',
-  regional = 'OTRA', // <--- AHORA RECIBE LA REGIONAL
+  regional = 'OTRA',
   overwrite = false
 }) {
   if (!title) throw new Error('El título es obligatorio.');
@@ -64,7 +64,7 @@ async function guardarInforme({
             mimeType: 'application/pdf',
             numeroIncidencia,
             includesActa,
-            regional // <--- Y AHORA LA GUARDA EN LA BASE DE DATOS
+            regional 
           });
           resolve(informe);
         } catch (dbErr) {
@@ -160,6 +160,64 @@ async function eliminarInforme({
   return { cloudResult };
 }
 
+async function editarInforme({
+  id,
+  title,
+  numeroIncidencia,
+  regional,
+  includesActa = undefined
+}) {
+  if (!id) {
+    const err = new Error('Debe especificar el id del informe.');
+    err.status = 400;
+    throw err;
+  }
+
+  const informe = await Informe.findById(id);
+
+  if (!informe) {
+    const err = new Error('Informe no encontrado.');
+    err.status = 404;
+    throw err;
+  }
+
+  if (
+    typeof numeroIncidencia === 'string' &&
+    numeroIncidencia.trim()
+  ) {
+    const existente = await Informe.findOne({
+      numeroIncidencia: numeroIncidencia.trim(),
+      _id: { $ne: id }
+    });
+
+    if (existente) {
+      const err = new Error('Ya existe un informe con ese número de incidencia.');
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  if (typeof title === 'string') {
+    informe.title = title.trim();
+  }
+
+  if (typeof numeroIncidencia === 'string') {
+    informe.numeroIncidencia = numeroIncidencia.trim();
+  }
+
+  if (typeof regional === 'string') {
+    informe.regional = regional.trim();
+  }
+
+  if (typeof includesActa === 'boolean') {
+    informe.includesActa = includesActa;
+  }
+
+  await informe.save();
+
+  return informe;
+}
+
 async function eliminarInformesBulk({
   ids = [],
   requesterUserId = null,
@@ -199,6 +257,7 @@ async function eliminarInformesBulk({
 
 module.exports = {
   guardarInforme,
+  editarInforme,
   eliminarInforme,
   eliminarInformesBulk
 };

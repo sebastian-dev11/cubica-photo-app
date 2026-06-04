@@ -20,7 +20,7 @@ function isCloudinaryUrl(url) {
   return typeof url === 'string' && /res\.cloudinary\.com/.test(url);
 }
 
-// Inserta transformaciones en URL de Cloudinary
+
 function insertTransformInCloudinaryUrl(url, transformStr) {
   try {
     if (!isCloudinaryUrl(url)) return url;
@@ -43,19 +43,17 @@ function insertTransformInCloudinaryUrl(url, transformStr) {
   }
 }
 
-// Transformacion para fotos del informe
+
 function buildTransformedUrl(url) {
   const transform = 'f_jpg,q_75,w_1600';
   return insertTransformInCloudinaryUrl(url, transform);
 }
 
-// Transformacion para logos
 function buildLogoUrl(url) {
   const transform = 'f_png,q_auto,w_400';
   return insertTransformInCloudinaryUrl(url, transform);
 }
 
-// Descarga binaria de archivo
 async function safeGetBuffer(url) {
   if (!url || typeof url !== 'string') return null;
   try {
@@ -67,7 +65,6 @@ async function safeGetBuffer(url) {
   }
 }
 
-// Dibuja imagen centrada en una caja
 function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
   const img = doc.openImage(imgBuffer);
   const iw = img.width || 1;
@@ -81,13 +78,11 @@ function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
   return { drawX, drawY, drawW, drawH };
 }
 
-// Extrae publicId desde URL de Cloudinary
 function getPublicIdFromUrl(url) {
   const match = (url || '').match(/\/v\d+\/(.+)\.(jpg|png|jpeg|webp|gif|heic|heif|bmp|tif|tiff)/i);
   return match ? match[1] : null;
 }
 
-// Limpia archivos temporales por sesion
 function cleanupTempsBySession(sesionId) {
   try {
     const tempDir = path.join(__dirname, '../uploads/temp');
@@ -102,8 +97,6 @@ function cleanupTempsBySession(sesionId) {
     console.warn('No se pudo limpiar temporales por sesion:', sesionId, e?.message || e);
   }
 }
-
-// Destruye recurso en Cloudinary
 async function destroyCloudinary(publicId, resourceType) {
   try {
     if (!publicId) return { ok: false, error: 'publicId vacio' };
@@ -164,7 +157,6 @@ router.post('/session/reset/:sesionId', async (req, res) => {
   }
 });
 
-// Generacion del PDF
 router.get('/generar/:sesionId', async (req, res) => {
   const { sesionId } = req.params;
   const { tiendaId } = req.query;
@@ -172,7 +164,7 @@ router.get('/generar/:sesionId', async (req, res) => {
 
   const numeroIncidencia = (req.query.numeroIncidencia || '').toString().trim();
 
-  // Determinar ubicacion y regional desde la BD
+  
   let ubicacion = req.query.ubicacion || 'Sitio no especificado';
   let regionalStr = ''; 
   let regionalBd = 'OTRA';
@@ -181,9 +173,7 @@ router.get('/generar/:sesionId', async (req, res) => {
     try {
       const tienda = await Tienda.findById(tiendaId);
       if (tienda) {
-        // Formato limpio de ubicación
         ubicacion = `${tienda.nombre} - ${tienda.departamento}, ${tienda.ciudad}`;
-        // Extraemos la regional
         regionalStr = `Regional: ${tienda.regional}`;
         regionalBd = tienda.regional;
       }
@@ -192,14 +182,14 @@ router.get('/generar/:sesionId', async (req, res) => {
     }
   }
 
-  // Directorio temporal
+  
   const tempDir = path.join(__dirname, '../uploads/temp');
   if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
   const pdfImagenesPath = path.join(tempDir, `pdf-imagenes-${sesionId}.pdf`);
   const pdfFinalPath = path.join(tempDir, `pdf-final-${sesionId}.pdf`);
 
-  // Limpieza de temporales
+  
   const cleanupTemps = () => {
     try {
       if (fs.existsSync(pdfImagenesPath)) fs.unlinkSync(pdfImagenesPath);
@@ -252,13 +242,13 @@ router.get('/generar/:sesionId', async (req, res) => {
       doc.fillColor('black').fontSize(24).text('Informe Tecnico', 50, 100, { align: 'center' });
       doc.moveDown();
       
-      // 1. Dibuja la ubicación
+      
       doc.fontSize(14).text(ubicacion, { align: 'center' });
 
       doc.moveDown(0.5);
       doc.fontSize(12).text(`Generado: ${fechaActual}`, { align: 'center' });
 
-      // 2. Dibuja la Incidencia
+      
       if (numeroIncidencia) {
         const raw = numeroIncidencia.toString().trim();
         const onlyDigits = (raw.match(/\d+/g) || []).join('');
@@ -269,7 +259,7 @@ router.get('/generar/:sesionId', async (req, res) => {
           .text(`Incidencia: ${display}`, { align: 'center' });
       }
 
-      // 3. Dibuja la Regional (NUEVO)
+      
       if (regionalStr) {
         doc.moveDown(0.3);
         

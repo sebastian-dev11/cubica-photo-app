@@ -11,7 +11,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Listar regionales disponibles
+
 router.get('/regionales', async (req, res) => {
   try {
     const regionales = await Tienda.distinct('regional');
@@ -21,7 +21,7 @@ router.get('/regionales', async (req, res) => {
   }
 });
 
-// Listar ciudades dependientes de una regional
+
 router.get('/ciudades', async (req, res) => {
   try {
     const { regional } = req.query;
@@ -34,7 +34,7 @@ router.get('/ciudades', async (req, res) => {
   }
 });
 
-// Listar departamentos dependientes de regional y ciudad
+
 router.get('/departamentos', async (req, res) => {
   try {
     const { regional, ciudad } = req.query;

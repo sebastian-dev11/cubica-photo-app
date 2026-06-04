@@ -3,7 +3,6 @@ const UsuarioUnico = require('../models/UsuarioUnico');
 
 module.exports = async function adminOnly(req, res, next) {
   try {
-    // Puedes recibir sesionId por query o header
     const sesionId = req.query.sesionId || req.headers['x-sesion-id'];
     if (!sesionId) return res.status(403).json({ error: 'Solo admin (falta sesionId)' });
 

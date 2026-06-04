@@ -4,8 +4,6 @@ const cloudinary = require('cloudinary').v2;
 const streamifier = require('streamifier');
 
 const router = express.Router();
-
-/* ========= Multer en memoria + filtro de tipos ========= */
 const storage = multer.memoryStorage();
 const fileFilter = (req, file, cb) => {
   const isPdf = file.mimetype === 'application/pdf';
@@ -22,8 +20,6 @@ const upload = multer({
 
 
 const actasEnMemoria = {}; 
-
-/* ========= Helper: subir buffer a Cloudinary ========= */
 function uploadBufferToCloudinary(buffer, options = {}) {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(options, (err, res) => {
@@ -57,7 +53,7 @@ router.post(
         actasEnMemoria[sesionId] = { acta: null, imagenes: [] };
       }
 
-      // PDF (resource_type: 'raw')
+      
       let actaSubida = null;
       if (pdfFile) {
         const pdfResult = await uploadBufferToCloudinary(pdfFile.buffer, {
@@ -68,7 +64,7 @@ router.post(
         actasEnMemoria[sesionId].acta = actaSubida;
       }
 
-      // Imágenes (resource_type: 'image')
+      
       let imagenesSubidas = [];
       if (imageFiles.length > 0) {
         const results = await Promise.all(
@@ -97,7 +93,7 @@ router.post(
   }
 );
 
-/* GET /:sesionId (ver lo guardado en memoria) ========= */
+
 router.get('/:sesionId', (req, res) => {
   const { sesionId } = req.params;
   res.json({
@@ -107,11 +103,6 @@ router.get('/:sesionId', (req, res) => {
   });
 });
 
-/* DELETE /:sesionId/item (borra un archivo de Cloudinary y memoria)
-Body JSON:
-- public_id: string (obligatorio)
-- tipo: 'raw' | 'image' (obligatorio)  -> 'raw' para PDF, 'image' para imágenes
-*/
 router.delete('/:sesionId/item', async (req, res) => {
   try {
     const { sesionId } = req.params;
@@ -134,8 +125,6 @@ router.delete('/:sesionId/item', async (req, res) => {
     res.status(500).json({ mensaje: 'No se pudo eliminar el archivo' });
   }
 });
-
-/*DELETE /:sesionId (limpia memoria; NO borra Cloudinary) ========= */
 router.delete('/:sesionId', (req, res) => {
   const { sesionId } = req.params;
   delete actasEnMemoria[sesionId];

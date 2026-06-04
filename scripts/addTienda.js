@@ -1,23 +1,8 @@
-/**
- * scripts/addTienda.js
- *
- * Inserta (o actualiza) una tienda:
- * - nombre: D1 El Tejar
- * - regional: SIBATE
- * - departamento: Cundinamarca
- * - ciudad: Chía
- *
- * Uso:
- * node scripts/addTienda.js
- * # Si existe y quieres forzar actualización de datos:
- * FORCE_UPDATE=1 node scripts/addTienda.js
- */
-
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 
-// Cargar .env desde ubicaciones comunes
+
 const envCandidates = [
   path.resolve(process.cwd(), '.env'),
   path.resolve(__dirname, '..', '.env'),
@@ -30,16 +15,15 @@ for (const p of envCandidates) {
   }
 }
 
-// Modelo Tienda (usa tu ../db internamente si aplica, o conexión directa aquí)
+
 const Tienda = require('../models/tienda');
 
-// Datos de ejemplo (puedes editarlos o reemplazarlos por flags si quieres)
-const NOMBRE = 'APERTURA FACTORY';
-const REGIONAL = 'BOS'; // <--- NUEVO CAMPO AÑADIDO
-const DEPARTAMENTO = 'BOGOTA D.C';
-const CIUDAD = 'BOGOTA D.C';
 
-// URL de Mongo desde .env (acepta varios nombres)
+const NOMBRE = 'ALCAZARES';
+const REGIONAL = 'BAQ'; 
+const CIUDAD = 'SANTA MARTA';
+
+
 const mongoUri =
   process.env.MONGODB_URI ||
   process.env.MONGO_URI ||
@@ -48,7 +32,7 @@ const mongoUri =
   process.env.DATABASE_URL;
 
 (async () => {
-  // Validar URI
+  
   if (!mongoUri) {
     console.error('Falta MONGODB_URI (o equivalente) en el .env.');
     process.exit(1);
@@ -60,15 +44,14 @@ const mongoUri =
 
   // Normalizar strings
   const nombre = String(NOMBRE).replace(/\s+/g, ' ').trim();
-  const regional = String(REGIONAL).replace(/\s+/g, ' ').trim(); // <--- NORMALIZACIÓN
+  const regional = String(REGIONAL).replace(/\s+/g, ' ').trim(); 
   const departamento = String(DEPARTAMENTO).replace(/\s+/g, ' ').trim();
   const ciudad = String(CIUDAD).replace(/\s+/g, ' ').trim();
 
-  // Buscar por combinación nombre+ciudad
+  
   const existente = await Tienda.findOne({ nombre, ciudad });
 
   if (!existente) {
-    // Crear nueva tienda incluyendo la regional
     const nueva = await Tienda.create({ nombre, regional, departamento, ciudad });
     console.log('Tienda creada:', {
       _id: nueva._id.toString(),
@@ -78,9 +61,8 @@ const mongoUri =
       ciudad: nueva.ciudad,
     });
   } else {
-    // Actualizar si se fuerza (por defecto no pisa datos)
     if (process.env.FORCE_UPDATE === '1') {
-      const update = { nombre, regional, departamento, ciudad }; // <--- SE INCLUYE EN LA ACTUALIZACIÓN
+      const update = { nombre, regional, departamento, ciudad }; 
       await Tienda.updateOne({ _id: existente._id }, { $set: update });
 
       console.log('Tienda existente actualizada:', {

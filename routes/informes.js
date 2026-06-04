@@ -1,26 +1,21 @@
 const express = require('express');
 const router = express.Router();
 const Informe = require('../models/informe');
-const Sesion = require('../models/sesion'); // para verificar admin por sesionId
-const UsuarioUnico = require('../models/UsuarioUnico'); // fallback por si no existiera Sesion.isAdmin
+const Sesion = require('../models/sesion'); 
+const UsuarioUnico = require('../models/UsuarioUnico');
 const {
+  editarInforme,
   eliminarInforme,
   eliminarInformesBulk,
 } = require('../services/informeService');
 
-/* =========================
-   Helpers
-========================= */
 
-/** Determina si la solicitud es de un ADMIN (por sesionId en query o header). */
 async function isAdminRequest(req) {
   const sesionId = req.query.sesionId || req.headers['x-sesion-id'];
   if (!sesionId) return false;
 
   const sesion = await Sesion.findOne({ sesionId }).lean();
   if (sesion?.isAdmin) return true;
-
-  // Fallback: si no quedó isAdmin en Sesion, revisa usuario
   if (sesion?.usuarioId) {
     const user = await UsuarioUnico.findById(sesion.usuarioId).lean();
     if (user?.usuario === 'admin') return true;
@@ -28,18 +23,16 @@ async function isAdminRequest(req) {
   return false;
 }
 
-/** Normaliza y limita la paginación */
 function sanitizePagination(page, limit) {
   let p = parseInt(page, 10);
   let l = parseInt(limit, 10);
   if (!Number.isFinite(p) || p < 1) p = 1;
   if (!Number.isFinite(l) || l < 1) l = 10;
-  // límite duro para proteger el backend
   if (l > 100) l = 100;
   return { page: p, limit: l };
 }
 
-/** Calcula un URL compartible a partir del doc de Informe */
+
 function computeShareUrl(inf) {
   return (
     inf?.url ||
@@ -49,9 +42,6 @@ function computeShareUrl(inf) {
   );
 }
 
-/* =========================
-   GET /informes  (listado)
-========================= */
 router.get('/', async (req, res) => {
   try {
     const { page, limit } = sanitizePagination(req.query.page, req.query.limit);
@@ -59,7 +49,7 @@ router.get('/', async (req, res) => {
 
     const query = {};
 
-    // Filtro por texto: title o ubicacion
+  
     if (search) {
       const rx = new RegExp(search, 'i');
       query.$or = [{ title: rx }, { ubicacion: rx }];
@@ -73,12 +63,12 @@ router.get('/', async (req, res) => {
       query.numeroIncidencia = { $regex: new RegExp(incidencia, 'i') };
     }
 
-    // Filtro por usuario específico
+  
     if (userId) {
       query.generatedBy = userId;
     }
 
-    // Rango de fechas por createdAt
+    
     if (from || to) {
       query.createdAt = {};
       if (from) {
@@ -89,7 +79,7 @@ router.get('/', async (req, res) => {
         const d = new Date(to);
         if (!isNaN(d)) query.createdAt.$lt = d;
       }
-      // si quedó vacío, elimínalo
+    
       if (Object.keys(query.createdAt).length === 0) delete query.createdAt;
     }
 
@@ -102,7 +92,7 @@ router.get('/', async (req, res) => {
       .limit(limit)
       .lean();
 
-    // Adjunta shareUrl siempre (para evitar “no viene la URL” en front)
+    
     const data = (informes || []).map((inf) => ({
       ...inf,
       shareUrl: computeShareUrl(inf),
@@ -122,9 +112,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-/* =========================================================
-   GET /informes/:id  — Obtiene un informe por id (ADMIN)
-========================================================= */
 router.get('/:id', async (req, res) => {
   try {
     const admin = await isAdminRequest(req);
@@ -151,12 +138,6 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-/* =======================================================================================
-   GET /informes/ultimo-por-sesion?sesionId=XXXX
-   Devuelve el último informe creado para esa sesión.
-   - ADMIN: puede consultar cualquier sesionId.
-   - No admin: solo puede consultar si el sesionId del query/header coincide con el pedido.
-======================================================================================= */
 router.get('/utils/ultimo-por-sesion', async (req, res) => {
   try {
     const targetSesionId = req.query.sesionId;
@@ -164,10 +145,9 @@ router.get('/utils/ultimo-por-sesion', async (req, res) => {
       return res.status(400).json({ error: 'Debe enviar ?sesionId=...' });
     }
 
-    // Permisos
+    
     const admin = await isAdminRequest(req);
     if (!admin) {
-      // Si no es admin, solo permitimos consultar su propia sesión
       const requester = req.query.sesionId || req.headers['x-sesion-id'];
       if (!requester || requester !== targetSesionId) {
         return res.status(403).json({ error: 'No autorizado para consultar esta sesión' });
@@ -192,9 +172,6 @@ router.get('/utils/ultimo-por-sesion', async (req, res) => {
   }
 });
 
-/* ==========================================
-   POST /informes/bulk-delete  (ADMIN ONLY)
-========================================== */
 router.post('/bulk-delete', async (req, res) => {
   try {
     const { ids } = req.body || {};
@@ -211,9 +188,8 @@ router.post('/bulk-delete', async (req, res) => {
 
     const result = await eliminarInformesBulk({
       ids,
-      requesterUserId: null,      // no necesario al ser admin
-      requesterSesionId,
-      isAdmin: true,              // bypass de propiedad
+      requesterUserId: null,      
+      isAdmin: true,              
     });
 
     return res.json(result);
@@ -223,9 +199,73 @@ router.post('/bulk-delete', async (req, res) => {
   }
 });
 
-/* ===============================
-   DELETE /informes/:id  (ADMIN)
-=============================== */
+router.put('/:id', async (req, res) => {
+  try {
+    const admin = await isAdminRequest(req);
+
+    if (!admin) {
+      return res.status(403).json({
+        error: 'Solo admin puede editar informes.'
+      });
+    }
+
+    const { id } = req.params;
+
+    const informe = await Informe.findById(id);
+
+    if (!informe) {
+      return res.status(404).json({
+        error: 'Informe no encontrado'
+      });
+    }
+
+    const {
+      title,
+      numeroIncidencia,
+      regional,
+      includesActa
+    } = req.body;
+
+    
+    if (typeof title === 'string') {
+      informe.title = title.trim();
+    }
+
+    
+    if (typeof numeroIncidencia === 'string') {
+      informe.numeroIncidencia = numeroIncidencia.trim();
+    }
+
+    
+    if (typeof regional === 'string') {
+      informe.regional = regional.trim();
+    }
+
+    
+    if (typeof includesActa === 'boolean') {
+      informe.includesActa = includesActa;
+    }
+
+    await informe.save();
+
+    return res.json({
+      ok: true,
+      mensaje: 'Informe actualizado correctamente',
+      informe: {
+        ...informe.toObject(),
+        shareUrl: computeShareUrl(informe)
+      }
+    });
+
+  } catch (err) {
+    console.error('Error actualizando informe:', err);
+
+    return res.status(500).json({
+      error: 'Error al actualizar informe'
+    });
+  }
+});
+
 router.delete('/:id', async (req, res) => {
   try {
     const admin = await isAdminRequest(req);
@@ -238,9 +278,9 @@ router.delete('/:id', async (req, res) => {
 
     const data = await eliminarInforme({
       id,
-      requesterUserId: null,   // no necesario al ser admin
+      requesterUserId: null,   
       requesterSesionId,
-      isAdmin: true,           // bypass de propiedad
+      isAdmin: true,           
     });
 
     return res.json({ ok: true, mensaje: 'Informe eliminado', ...data });

@@ -7,14 +7,14 @@ const Tienda = require('../models/tienda');
 
 const CSV_FOLDER = path.join(__dirname, '../csv_regionales');
 
-// Procesamiento de archivo CSV con autodeteccion y limpieza extrema
+
 async function procesarCSV(filePath, regional, archivo) {
   return new Promise((resolve, reject) => {
-    // 1. Detectar el separador leyendo la primera linea del archivo
+    
     const buffer = fs.readFileSync(filePath);
     let rawText = buffer.toString('utf8');
     
-    // Limpiar BOM (Byte Order Mark) oculto de Excel
+    
     if (rawText.charCodeAt(0) === 0xFEFF) {
       rawText = rawText.substring(1);
     }
@@ -27,7 +27,7 @@ async function procesarCSV(filePath, regional, archivo) {
     fs.createReadStream(filePath)
       .pipe(csv({ separator: separador }))
       .on('headers', (headers) => {
-        // Imprime las cabeceras del primer archivo para que veamos qué está leyendo
+        
         if (totalArchivosProcesados === 0) {
           console.log(`\n🔍 DEBUG - Cabeceras leidas en ${archivo}:`, headers);
           console.log(`🔍 DEBUG - Separador detectado: "${separador}"\n`);
@@ -40,7 +40,7 @@ async function procesarCSV(filePath, regional, archivo) {
 
         for (const key of Object.keys(row)) {
           if (!key) continue;
-          // Limpieza extrema: Borra todo lo que no sea letra o numero
+          
           const cleanKey = String(key).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
           const value = row[key] ? row[key].trim().toUpperCase() : null;
 
@@ -49,10 +49,10 @@ async function procesarCSV(filePath, regional, archivo) {
           if (cleanKey.includes('DEPARTAMENTO')) departamento = value || '';
         }
 
-        // Si no detecto el nombre de la tienda, salto la fila
+        
         if (!nombre || nombre === 'NAN') return;
 
-        // Autocompletado si el departamento viene vacio
+        
         if (!departamento || departamento === 'NAN') {
           if (ciudad.includes('BOGOT') || nombre.includes('BOG')) {
             departamento = 'BOGOTA';
@@ -73,7 +73,7 @@ async function procesarCSV(filePath, regional, archivo) {
 
 let totalArchivosProcesados = 0;
 
-// Sincronizacion principal
+
 async function sincronizarTiendas() {
   try {
     const archivos = fs.readdirSync(CSV_FOLDER).filter(file => file.endsWith('.csv'));
@@ -83,7 +83,7 @@ async function sincronizarTiendas() {
     console.log(`Iniciando sincronizacion de ${archivos.length} archivos CSV...`);
 
     for (const archivo of archivos) {
-      // Extraccion segura de la regional
+      
       const nombreLimpio = archivo.replace('.csv', '').trim();
       let regional = 'OTRA';
       
@@ -102,7 +102,7 @@ async function sincronizarTiendas() {
       console.log(`Archivo procesado [${regional}]: ${tiendasDelArchivo.length} tiendas encontradas.`);
       
       for (const tienda of tiendasDelArchivo) {
-        // UPSERT: Si existe la actualiza (le pone la regional), si no, la crea.
+        
         await Tienda.findOneAndUpdate(
           { nombre: tienda.nombre },
           { $set: tienda },

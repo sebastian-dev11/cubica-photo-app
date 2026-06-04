@@ -3,7 +3,7 @@ const express = require('express');
 const mongoose = require('./db');
 const cors = require('cors');
 
-// Registrar modelos ANTES de las rutas
+
 require('./models/UsuarioUnico');
 require('./models/informe');
 
@@ -16,12 +16,11 @@ const informesRoutes = require('./routes/informes');
 
 const app = express();
 
-// Middlewares
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Rutas existentes
+
 app.use('/auth', authRoutes);
 app.use('/login', authRoutes);
 app.use('/crear', authRoutes);
@@ -30,7 +29,6 @@ app.use('/pdf', pdfRoutes);
 app.use('/acta', actaRoutes);
 app.use('/informes', informesRoutes);
 
-// Rutas de tiendas
 app.use('/tiendas', tiendasRoutes);
 
 const PORT = process.env.PORT || 3000;

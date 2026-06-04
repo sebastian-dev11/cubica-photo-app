@@ -7,7 +7,7 @@ mongoose.connect(process.env.MONGO_URI, {
 .then(() => console.log('Conectado a MongoDB'))
 .catch(err => {
   console.error('Error de conexión a MongoDB:', err.message);
-  process.exit(1); // Finaliza el proceso si no se conecta
+  process.exit(1); 
 });
 
 module.exports = mongoose;

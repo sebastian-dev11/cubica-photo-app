@@ -6,7 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Configuración de multer para almacenamiento temporal
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, 'uploads/'),
   filename: (req, file, cb) => {
@@ -16,7 +16,7 @@ const storage = multer.diskStorage({
   }
 });
 
-// Filtro de archivos permitidos
+
 const fileFilter = (req, file, cb) => {
   const tiposPermitidos = ['image/jpeg', 'image/png', 'image/jpg', "image/*"];
   if (tiposPermitidos.includes(file.mimetype)) {
@@ -28,11 +28,11 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({ storage, fileFilter });
 
-// Ruta para subir imagen con sesión, tipo, ubicación y observación
+
 router.post('/subir', upload.single('imagen'), async (req, res) => {
   const { sesionId, tipo, ubicacion, observacion } = req.body;
 
-  // Validaciones
+
   if (!req.file || !sesionId || !tipo || !ubicacion) {
     return res.status(400).json({ mensaje: 'Falta imagen, sesionId, tipo o ubicación' });
   }
@@ -42,18 +42,18 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
   }
 
   try {
-    // Subir imagen a Cloudinary
+    
     const resultado = await cloudinary.uploader.upload(req.file.path, {
       folder: 'mi-app'
     });
 
-    // Normalizar nombreOriginal
+    
     const nombreBase = path.basename(req.file.originalname, path.extname(req.file.originalname))
       .toLowerCase()
       .trim()
       .replace(/\s+/g, '_');
 
-    // Guardar metadatos en MongoDB
+    
     const nuevaImagen = new Imagen({
       nombreOriginal: nombreBase,
       nombreArchivoOriginal: req.file.originalname,
@@ -61,12 +61,12 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
       sesionId,
       tipo,
       ubicacion,
-      observacion: observacion || '' // opcional
+      observacion: observacion || '' 
     });
 
     await nuevaImagen.save();
 
-    // Eliminar archivo temporal
+  
     fs.unlinkSync(req.file.path);
 
     res.status(201).json({
