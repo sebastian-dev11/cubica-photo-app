@@ -19,9 +19,10 @@ for (const p of envCandidates) {
 const Tienda = require('../models/tienda');
 
 
-const NOMBRE = 'ALCAZARES';
-const REGIONAL = 'BAQ'; 
-const CIUDAD = 'SANTA MARTA';
+const NOMBRE = 'CEDI IBAGUE';
+const REGIONAL = 'IBA'; 
+const CIUDAD = 'IBAGUE';
+const DEPARTAMENTO = 'TOLIMA';
 
 
 const mongoUri =

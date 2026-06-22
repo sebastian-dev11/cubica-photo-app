@@ -19,8 +19,8 @@ for (const p of envCandidates) {
 
 const UsuarioUnico = require('../models/UsuarioUnico');
 
-const CEDULA = '3027837';
-const NOMBRE = 'ROUSBELL AGUILERA GARZÓN';
+const CEDULA = '1023975443';
+const NOMBRE = 'MIYER PEREZ PEREZ';
 
 
 const mongoUri =
