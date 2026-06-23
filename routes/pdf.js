@@ -254,25 +254,25 @@ function computeImagePageLayout(doc, pairsOnPage, contentTop, isFirstPage) {
   const marginBottom = doc.page.margins.bottom;
 
   const availableWidth = doc.page.width - marginLeft - marginRight;
-  const gapX = 24;
+  const gapX = 34;
   const boxW = Math.floor((availableWidth - gapX) / 2);
+  const boxH = isFirstPage ? 205 : 225;
 
   const labelGap = 8;
   const labelH = 18;
   const obsGap = 6;
-  const obsReserve = 36;
-  const lineGap = 14;
-  const bottomGap = isFirstPage ? 0 : 12;
-  const firstPagePadding = isFirstPage ? 16 : 0;
+  const obsReserve = 32;
+  const lineGap = 16;
+  const bottomGap = 18;
+
+  const pairStepY = boxH + labelGap + labelH + obsGap + obsReserve + lineGap + bottomGap;
 
   const pageTop = isFirstPage ? contentTop + 18 : marginTop;
   const pageBottom = doc.page.height - marginBottom;
-  const availableHeight = Math.max(0, pageBottom - pageTop - firstPagePadding * 2);
-  const reservedByPair = labelGap + labelH + obsGap + obsReserve + lineGap + bottomGap;
-  const boxH = Math.max(180, Math.floor((availableHeight - pairsOnPage * reservedByPair) / pairsOnPage));
-  const pairStepY = boxH + reservedByPair;
+  const availableHeight = Math.max(0, pageBottom - pageTop);
   const contentHeight = pairsOnPage * pairStepY;
-  const startY = pageTop + firstPagePadding + Math.max(0, Math.floor((availableHeight - contentHeight) / 2));
+
+  const startY = pageTop + Math.max(0, Math.floor((availableHeight - contentHeight) / 2));
 
   return {
     startX: marginLeft,
