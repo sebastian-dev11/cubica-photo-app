@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const cloudinary = require('../utils/cloudinary');
 const streamifier = require('streamifier');
+const { procesarImagenActaSeguro } = require('../utils/actaScanner');
 
 const router = express.Router();
 const storage = multer.memoryStorage();
@@ -56,6 +57,34 @@ function uploadBufferToCloudinary(buffer, options = {}) {
 
     streamifier.createReadStream(buffer).pipe(stream);
   });
+}
+
+async function subirImagenActaProcesada(img, sesionId) {
+  const imagenProcesada = await procesarImagenActaSeguro(img.buffer, {
+    mimetype: img.mimetype,
+    crop: true,
+    scanMode: 'color'
+  });
+
+  const uploadOptions = {
+    folder: `actas/${sesionId}/imagenes`,
+    resource_type: 'image'
+  };
+
+  if (imagenProcesada.procesada) {
+    uploadOptions.format = 'jpg';
+  }
+
+  const result = await uploadBufferToCloudinary(imagenProcesada.buffer, uploadOptions);
+
+  return {
+    url: result.secure_url,
+    public_id: result.public_id,
+    escaneada: Boolean(imagenProcesada.procesada),
+    width: imagenProcesada.width || result.width || null,
+    height: imagenProcesada.height || result.height || null,
+    crop: imagenProcesada.crop || null
+  };
 }
 
 function obtenerItemSesion(sesionId, publicId) {
@@ -135,15 +164,8 @@ router.post(
       const imagenesSubidas = [];
 
       for (const img of imageFiles) {
-        const result = await uploadBufferToCloudinary(img.buffer, {
-          folder: `actas/${sesionId}/imagenes`,
-          resource_type: 'image'
-        });
-
-        imagenesSubidas.push({
-          url: result.secure_url,
-          public_id: result.public_id
-        });
+        const imagenSubida = await subirImagenActaProcesada(img, sesionId);
+        imagenesSubidas.push(imagenSubida);
       }
 
       if (imagenesSubidas.length > 0) {

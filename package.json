@@ -26,6 +26,7 @@
     "pdf-lib": "^1.17.1",
     "pdf-merger-js": "^3.4.0",
     "pdfkit": "^0.17.1",
+    "sharp": "^0.35.2",
     "streamifier": "^0.1.1"
   }
 }
