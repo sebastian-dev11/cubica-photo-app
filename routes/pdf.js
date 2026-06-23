@@ -112,13 +112,13 @@ function cleanupTempsBySession(sesionId) {
       if (fs.existsSync(p)) fs.unlinkSync(p);
     }
   } catch (e) {
-    console.warn('No se pudo limpiar temporales por sesion:', sesionId, e?.message || e);
+    console.warn('No se pudo limpiar temporales por sesión:', sesionId, e?.message || e);
   }
 }
 
 async function destroyCloudinary(publicId, resourceType) {
   try {
-    if (!publicId) return { ok: false, error: 'publicId vacio' };
+    if (!publicId) return { ok: false, error: 'publicId vacío' };
 
     const res = await cloudinary.uploader.destroy(publicId, {
       resource_type: resourceType
@@ -223,7 +223,7 @@ function renderGeolocalizacion(doc, geolocalizacion) {
   const longitud = formatearCoordenada(geolocalizacion.longitud);
   const precision = normalizarNumero(geolocalizacion.precision);
   const fecha = formatearFechaGeo(geolocalizacion.fechaCaptura);
-  const precisionTexto = precision !== null ? ` | Precision: ${Math.round(precision)} m` : '';
+  const precisionTexto = precision !== null ? ` | Precisión: ${Math.round(precision)} m` : '';
   const fechaTexto = fecha ? ` | Capturada: ${fecha}` : '';
 
   doc.moveDown(0.3);
@@ -235,7 +235,7 @@ function renderGeolocalizacion(doc, geolocalizacion) {
   if (geolocalizacion.mapsUrl) {
     doc.moveDown(0.1);
     doc.fontSize(9).fillColor('#003366').text(
-      'Ver ubicacion en Google Maps',
+      'Ver ubicación en Google Maps',
       {
         align: 'center',
         link: geolocalizacion.mapsUrl,
@@ -254,29 +254,25 @@ function computeImagePageLayout(doc, pairsOnPage, contentTop, isFirstPage) {
   const marginBottom = doc.page.margins.bottom;
 
   const availableWidth = doc.page.width - marginLeft - marginRight;
-  const gapX = 34;
+  const gapX = 24;
   const boxW = Math.floor((availableWidth - gapX) / 2);
-  const boxH = isFirstPage ? 205 : 225;
 
   const labelGap = 8;
   const labelH = 18;
   const obsGap = 6;
-  const obsReserve = 32;
-  const lineGap = 16;
-  const bottomGap = 18;
-
-  const pairStepY = boxH + labelGap + labelH + obsGap + obsReserve + lineGap + bottomGap;
+  const obsReserve = 36;
+  const lineGap = 14;
+  const bottomGap = isFirstPage ? 0 : 12;
+  const firstPagePadding = isFirstPage ? 16 : 0;
 
   const pageTop = isFirstPage ? contentTop + 18 : marginTop;
   const pageBottom = doc.page.height - marginBottom;
-  const availableHeight = Math.max(0, pageBottom - pageTop);
+  const availableHeight = Math.max(0, pageBottom - pageTop - firstPagePadding * 2);
+  const reservedByPair = labelGap + labelH + obsGap + obsReserve + lineGap + bottomGap;
+  const boxH = Math.max(180, Math.floor((availableHeight - pairsOnPage * reservedByPair) / pairsOnPage));
+  const pairStepY = boxH + reservedByPair;
   const contentHeight = pairsOnPage * pairStepY;
-
-  let startY = pageTop;
-
-  if (!isFirstPage) {
-    startY = pageTop + Math.max(0, Math.floor((availableHeight - contentHeight) / 2));
-  }
+  const startY = pageTop + firstPagePadding + Math.max(0, Math.floor((availableHeight - contentHeight) / 2));
 
   return {
     startX: marginLeft,
@@ -331,8 +327,8 @@ async function renderEvidencePairs(doc, pares, firstPageTopY) {
       const labelsY = y + layout.boxH + layout.labelGap;
 
       doc.fontSize(12).fillColor('#003366')
-        .text('Antes de la instalacion', leftX, labelsY, { width: layout.boxW, align: 'center' })
-        .text('Despues de la instalacion', rightX, labelsY, { width: layout.boxW, align: 'center' });
+        .text('Antes de la instalación', leftX, labelsY, { width: layout.boxW, align: 'center' })
+        .text('Después de la instalación', rightX, labelsY, { width: layout.boxW, align: 'center' });
 
       const obsY = labelsY + 20;
       let maxObsHeight = 0;
@@ -372,7 +368,7 @@ router.post('/session/reset/:sesionId', async (req, res) => {
     if (!sesionId || typeof sesionId !== 'string') {
       return res.status(400).json({
         ok: false,
-        error: 'sesionId invalido'
+        error: 'sesionId inválido'
       });
     }
 
@@ -440,11 +436,11 @@ router.post('/session/reset/:sesionId', async (req, res) => {
       deleted
     });
   } catch (e) {
-    console.error('Error en reset de sesion:', sesionId, e?.message || e);
+    console.error('Error en reset de sesión:', sesionId, e?.message || e);
 
     return res.status(e.status || 500).json({
       ok: false,
-      error: e.status ? e.message : 'Error interno al resetear sesion'
+      error: e.status ? e.message : 'Error interno al resetear sesión'
     });
   }
 });
@@ -540,11 +536,11 @@ router.get('/generar/:sesionId', async (req, res) => {
       if (wantsJson) {
         return res.status(404).json({
           ok: false,
-          error: 'No hay imagenes para esta sesion'
+          error: 'No hay imágenes para esta sesión'
         });
       }
 
-      return res.status(404).send('No hay imagenes para esta sesion');
+      return res.status(404).send('No hay imágenes para esta sesión');
     }
 
     await new Promise(async (resolve, reject) => {
@@ -572,7 +568,7 @@ router.get('/generar/:sesionId', async (req, res) => {
           doc.image(logoD1Buf, 50, 40, { width: 100 });
         }
 
-        doc.fillColor('black').fontSize(24).text('Informe Tecnico', 50, 100, { align: 'center' });
+        doc.fillColor('black').fontSize(24).text('Informe técnico', 50, 100, { align: 'center' });
         doc.moveDown();
         doc.fontSize(14).text(ubicacion, { align: 'center' });
         doc.moveDown(0.5);
@@ -594,7 +590,7 @@ router.get('/generar/:sesionId', async (req, res) => {
 
         doc.moveDown(1.5);
         doc.fontSize(10).fillColor('gray').text(
-          'Este informe contiene evidencia fotografica del antes y despues de la instalacion.',
+          'Este informe contiene evidencia fotográfica del antes y después de la instalación.',
           { align: 'center', lineGap: 2 }
         );
 
@@ -645,7 +641,7 @@ router.get('/generar/:sesionId', async (req, res) => {
           await merger.add(actaPath);
           hadActaPdf = true;
         } else {
-          console.warn(`El acta para ${sesionId} no es un PDF valido o no se pudo descargar`);
+          console.warn(`El acta para ${sesionId} no es un PDF válido o no se pudo descargar`);
         }
 
         if (actaPublicId) {
@@ -747,7 +743,7 @@ router.get('/generar/:sesionId', async (req, res) => {
       const finalBuffer = fs.readFileSync(pdfFinalPath);
 
       uploadMeta = await guardarInforme({
-        title: `Informe tecnico ${sesionId}`,
+        title: `Informe técnico ${sesionId}`,
         generatedBy: req.auth.userId,
         sesionId,
         buffer: finalBuffer,
