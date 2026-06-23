@@ -6,28 +6,24 @@ const DEFAULT_OPTIONS = {
   quality: 90,
   crop: true,
   previewWidth: 1000,
-  cropPaddingRatio: 0.018,
+  cropPaddingRatio: 0.02,
   documentThreshold: 132,
   minRowCoverage: 0.13,
   minColCoverage: 0.13,
   minDocumentAreaRatio: 0.16,
-  scanMode: 'clean',
-  cleanBrightness: 1.22,
-  cleanSaturation: 0.28,
-  cleanContrast: 1.22,
-  cleanOffset: -18,
-  colorBrightness: 1.16,
-  colorSaturation: 0.45,
-  colorContrast: 1.14,
-  colorOffset: -10,
-  bnContrast: 1.32,
-  bnOffset: -26,
-  bnThreshold: 166,
-  sharpenSigma: 1,
-  useClahe: true,
-  claheWidth: 5,
-  claheHeight: 5,
-  claheMaxSlope: 3
+  scanMode: 'soft',
+  softBrightness: 1.08,
+  softSaturation: 0.9,
+  softContrast: 1.02,
+  softOffset: -2,
+  cleanBrightness: 1.12,
+  cleanSaturation: 0.72,
+  cleanContrast: 1.05,
+  cleanOffset: -5,
+  bnBrightness: 1.08,
+  bnContrast: 1.08,
+  bnOffset: -6,
+  sharpenSigma: 0.45
 };
 
 function crearBase(buffer) {
@@ -71,18 +67,6 @@ function normalizarCaja(caja, width, height, paddingRatio) {
     width: Math.max(1, right - left),
     height: Math.max(1, bottom - top)
   };
-}
-
-function aplicarClahe(pipeline, options) {
-  if (!options.useClahe || typeof pipeline.clahe !== 'function') {
-    return pipeline;
-  }
-
-  return pipeline.clahe({
-    width: options.claheWidth,
-    height: options.claheHeight,
-    maxSlope: options.claheMaxSlope
-  });
 }
 
 function limitarNumero(valor, min, max, fallback) {
@@ -178,27 +162,28 @@ async function detectarCajaDocumento(buffer, opts = {}) {
   );
 }
 
-function aplicarModoBN(pipeline, options) {
-  const threshold = limitarNumero(options.bnThreshold, 120, 220, DEFAULT_OPTIONS.bnThreshold);
+function aplicarNitidezSuave(pipeline, options) {
+  return pipeline.sharpen({
+    sigma: options.sharpenSigma,
+    m1: 0.45,
+    m2: 0.75
+  });
+}
 
-  return aplicarClahe(
+function aplicarModoSoft(pipeline, options) {
+  return aplicarNitidezSuave(
     pipeline
-      .greyscale()
-      .normalise()
-      .linear(options.bnContrast, options.bnOffset),
+      .modulate({
+        brightness: options.softBrightness,
+        saturation: options.softSaturation
+      })
+      .linear(options.softContrast, options.softOffset),
     options
-  )
-    .threshold(threshold)
-    .median(1)
-    .sharpen({
-      sigma: options.sharpenSigma,
-      m1: 1.4,
-      m2: 2.2
-    });
+  );
 }
 
 function aplicarModoClean(pipeline, options) {
-  return aplicarClahe(
+  return aplicarNitidezSuave(
     pipeline
       .normalise()
       .modulate({
@@ -207,30 +192,19 @@ function aplicarModoClean(pipeline, options) {
       })
       .linear(options.cleanContrast, options.cleanOffset),
     options
-  )
-    .sharpen({
-      sigma: options.sharpenSigma,
-      m1: 1.35,
-      m2: 2.1
-    });
+  );
 }
 
-function aplicarModoColor(pipeline, options) {
-  return aplicarClahe(
+function aplicarModoBN(pipeline, options) {
+  return aplicarNitidezSuave(
     pipeline
-      .normalise()
+      .greyscale()
       .modulate({
-        brightness: options.colorBrightness,
-        saturation: options.colorSaturation
+        brightness: options.bnBrightness
       })
-      .linear(options.colorContrast, options.colorOffset),
+      .linear(options.bnContrast, options.bnOffset),
     options
-  )
-    .sharpen({
-      sigma: options.sharpenSigma,
-      m1: 1.25,
-      m2: 1.9
-    });
+  );
 }
 
 function aplicarModoEscaneo(pipeline, options) {
@@ -238,11 +212,11 @@ function aplicarModoEscaneo(pipeline, options) {
     return aplicarModoBN(pipeline, options);
   }
 
-  if (options.scanMode === 'color') {
-    return aplicarModoColor(pipeline, options);
+  if (options.scanMode === 'clean') {
+    return aplicarModoClean(pipeline, options);
   }
 
-  return aplicarModoClean(pipeline, options);
+  return aplicarModoSoft(pipeline, options);
 }
 
 async function procesarImagenActa(buffer, opts = {}) {
