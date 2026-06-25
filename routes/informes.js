@@ -206,27 +206,51 @@ function valorComparable(valor) {
   return valor;
 }
 
-function limpiarObjetoParaComparar(valor) {
+function limpiarObjetoParaComparar(valor, vistos = new WeakSet()) {
   if (valor === undefined || valor === null) return null;
 
   if (valor instanceof Date) {
     return valor.toISOString();
   }
 
-  if (Array.isArray(valor)) {
-    return valor.map((item) => limpiarObjetoParaComparar(item));
-  }
-
   if (valor && typeof valor === 'object') {
+    if (vistos.has(valor)) {
+      return null;
+    }
+
+    vistos.add(valor);
+
     if (valor.constructor?.name === 'ObjectId') {
       return valor.toString();
+    }
+
+    if (typeof valor.toObject === 'function') {
+      return limpiarObjetoParaComparar(
+        valor.toObject({
+          depopulate: true,
+          getters: false,
+          virtuals: false
+        }),
+        vistos
+      );
+    }
+
+    if (Array.isArray(valor)) {
+      return valor.map((item) => limpiarObjetoParaComparar(item, vistos));
+    }
+
+    if (valor instanceof Buffer) {
+      return null;
     }
 
     const obj = {};
 
     Object.keys(valor).forEach((key) => {
       if (key === '_id') return;
-      obj[key] = limpiarObjetoParaComparar(valor[key]);
+      if (key.startsWith('$')) return;
+      if (key.startsWith('_')) return;
+
+      obj[key] = limpiarObjetoParaComparar(valor[key], vistos);
     });
 
     return obj;
