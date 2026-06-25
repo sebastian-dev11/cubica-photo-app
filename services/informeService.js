@@ -5,6 +5,7 @@ const InformeVersion = require('../models/informeVersion');
 const Sesion = require('../models/sesion');
 const Tienda = require('../models/tienda');
 const cloudinary = require('../utils/cloudinary');
+const { regenerarYSubirPdfInforme } = require('./pdfInformeService');
 
 function slugify(str) {
   return String(str)
@@ -325,6 +326,83 @@ async function guardarVersionActual({
   return version + 1;
 }
 
+async function calcularSiguienteVersionActual(informe) {
+  const versionHistorica = await obtenerNumeroVersionDisponible(
+    informe._id,
+    informe.versionActual || 1
+  );
+
+  return versionHistorica + 1;
+}
+
+function construirOverridePdf(valoresNuevos = {}) {
+  const override = {};
+
+  [
+    'title',
+    'numeroIncidencia',
+    'regional',
+    'tiendaNombre',
+    'tiendaRegional',
+    'tiendaDepartamento',
+    'tiendaCiudad',
+    'geolocalizacion',
+    'evidenciasPrevias',
+    'evidenciasPosteriores',
+    'acta',
+    'actaImagenes'
+  ].forEach((key) => {
+    if (valoresNuevos[key] !== undefined) {
+      override[key] = valoresNuevos[key];
+    }
+  });
+
+  return override;
+}
+
+async function intentarRegenerarPdfInforme({
+  informe,
+  valoresNuevos,
+  cambios,
+  nuevaVersionActual
+}) {
+  if (!informe.fuentesPersistentes) {
+    return null;
+  }
+
+  const override = construirOverridePdf(valoresNuevos);
+
+  const resultado = await regenerarYSubirPdfInforme({
+    informe,
+    override,
+    versionActual: nuevaVersionActual
+  });
+
+  const pdfNuevo = {
+    url: resultado.url,
+    publicId: resultado.publicId,
+    mimeType: resultado.mimeType || 'application/pdf',
+    includesActa: Boolean(resultado.includesActa)
+  };
+
+  agregarCambio(
+    cambios,
+    'pdf',
+    {
+      url: informe.url,
+      publicId: informe.publicId,
+      mimeType: informe.mimeType,
+      includesActa: informe.includesActa
+    },
+    pdfNuevo
+  );
+
+  return {
+    ...pdfNuevo,
+    fuentes: resultado.fuentes || null
+  };
+}
+
 async function guardarInforme({
   title,
   generatedBy = null,
@@ -603,6 +681,29 @@ async function editarInforme({
   }
 
   if (cambios.length > 0) {
+    const nuevaVersionActualSugerida = await calcularSiguienteVersionActual(informe);
+    const pdfRegenerado = await intentarRegenerarPdfInforme({
+      informe,
+      valoresNuevos,
+      cambios,
+      nuevaVersionActual: nuevaVersionActualSugerida
+    });
+
+    if (pdfRegenerado) {
+      valoresNuevos.url = pdfRegenerado.url;
+      valoresNuevos.publicId = pdfRegenerado.publicId;
+      valoresNuevos.mimeType = pdfRegenerado.mimeType;
+      valoresNuevos.includesActa = pdfRegenerado.includesActa;
+
+      if (pdfRegenerado.fuentes) {
+        valoresNuevos.evidenciasPrevias = pdfRegenerado.fuentes.evidenciasPrevias;
+        valoresNuevos.evidenciasPosteriores = pdfRegenerado.fuentes.evidenciasPosteriores;
+        valoresNuevos.acta = pdfRegenerado.fuentes.acta;
+        valoresNuevos.actaImagenes = pdfRegenerado.fuentes.actaImagenes;
+        valoresNuevos.fuentesPersistentes = true;
+      }
+    }
+
     const nuevaVersionActual = await guardarVersionActual({
       informe,
       editadoPor,
