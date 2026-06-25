@@ -58,6 +58,14 @@ function limpiarTexto(valor) {
 }
 
 function normalizarNumero(valor) {
+  if (valor === undefined || valor === null || valor === '') {
+    return null;
+  }
+
+  if (typeof valor === 'string' && !valor.trim()) {
+    return null;
+  }
+
   const num = Number(valor);
 
   return Number.isFinite(num) ? num : null;
@@ -108,26 +116,39 @@ function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
 }
 
 function tieneGeolocalizacion(geolocalizacion) {
-  return (
-    geolocalizacion &&
-    geolocalizacion.latitud !== null &&
-    geolocalizacion.longitud !== null &&
-    geolocalizacion.latitud !== undefined &&
-    geolocalizacion.longitud !== undefined
-  );
+  if (!geolocalizacion || typeof geolocalizacion !== 'object') {
+    return false;
+  }
+
+  if (geolocalizacion.origen === 'none') {
+    return false;
+  }
+
+  const latitud = normalizarNumero(geolocalizacion.latitud);
+  const longitud = normalizarNumero(geolocalizacion.longitud);
+
+  const latitudValida = latitud !== null && latitud >= -90 && latitud <= 90;
+  const longitudValida = longitud !== null && longitud >= -180 && longitud <= 180;
+  const coordenadasCero = latitud === 0 && longitud === 0;
+
+  return latitudValida && longitudValida && !coordenadasCero;
 }
 
 function formatearCoordenada(valor) {
-  const num = Number(valor);
+  const num = normalizarNumero(valor);
 
-  if (!Number.isFinite(num)) return '';
+  if (num === null) return '';
 
   return num.toFixed(6);
 }
 
 function formatearFechaGeo(fecha) {
+  const fechaNormalizada = normalizarFecha(fecha);
+
+  if (!fechaNormalizada) return '';
+
   try {
-    return new Date(fecha).toLocaleString('es-CO', {
+    return fechaNormalizada.toLocaleString('es-CO', {
       dateStyle: 'medium',
       timeStyle: 'short',
       timeZone: 'America/Bogota'
