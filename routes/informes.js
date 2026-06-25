@@ -118,6 +118,17 @@ function normalizarBoolean(valor) {
   return undefined;
 }
 
+function debeActualizarGeolocalizacion(body = {}) {
+  const valor =
+    body.actualizarGeolocalizacion !== undefined
+      ? body.actualizarGeolocalizacion
+      : body.actualizarGPS !== undefined
+        ? body.actualizarGPS
+        : body.actualizarGps;
+
+  return normalizarBoolean(valor) === true;
+}
+
 function obtenerListaBody(body, key) {
   const valor = body?.[key];
 
@@ -573,7 +584,7 @@ async function prepararValoresAvanzados({ req, informe }) {
     agregarCambio(cambios, 'tiendaCiudad', informe.tiendaCiudad, valoresNuevos.tiendaCiudad);
   }
 
-  if (body.geolocalizacion !== undefined) {
+  if (body.geolocalizacion !== undefined && debeActualizarGeolocalizacion(body)) {
     valoresNuevos.geolocalizacion = normalizarGeolocalizacion(body.geolocalizacion);
     agregarCambio(cambios, 'geolocalizacion', informe.geolocalizacion, valoresNuevos.geolocalizacion);
   }
@@ -1173,6 +1184,8 @@ router.put('/:id', async (req, res) => {
       motivo
     } = req.body;
 
+    const actualizarGeolocalizacion = debeActualizarGeolocalizacion(req.body || {});
+
     const informe = await editarInforme({
       id,
       title,
@@ -1180,7 +1193,7 @@ router.put('/:id', async (req, res) => {
       regional,
       includesActa,
       tiendaId,
-      geolocalizacion,
+      geolocalizacion: actualizarGeolocalizacion ? geolocalizacion : undefined,
       editadoPor: req.auth.userId,
       motivo
     });
