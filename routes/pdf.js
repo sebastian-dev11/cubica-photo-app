@@ -82,6 +82,108 @@ function getPublicIdFromUrl(url) {
   return match ? match[1] : null;
 }
 
+function getPublicIdArchivoDesdeUrl(url) {
+  if (!isCloudinaryUrl(url)) return '';
+
+  try {
+    const uploadSegment = '/upload/';
+    const idx = url.indexOf(uploadSegment);
+
+    if (idx === -1) return '';
+
+    const afterUpload = url.slice(idx + uploadSegment.length).split('?')[0];
+    const segments = afterUpload.split('/').filter(Boolean);
+    const versionIndex = segments.findIndex((segment) => /^v\d+$/.test(segment));
+    const publicSegments = versionIndex >= 0 ? segments.slice(versionIndex + 1) : segments;
+
+    if (publicSegments.length === 0) return '';
+
+    return publicSegments.join('/').replace(/\.[a-z0-9]+$/i, '');
+  } catch {
+    return '';
+  }
+}
+
+function limpiarTextoFuente(valor) {
+  return typeof valor === 'string' ? valor.replace(/\s+/g, ' ').trim() : '';
+}
+
+function normalizarDimension(valor) {
+  const num = Number(valor);
+
+  return Number.isFinite(num) ? num : null;
+}
+
+function normalizarArchivoFuente(item = {}, orden = 0, tipoDefault = '') {
+  const url = limpiarTextoFuente(item.url);
+  const publicId = limpiarTextoFuente(
+    item.publicId ||
+    item.public_id ||
+    getPublicIdArchivoDesdeUrl(url) ||
+    getPublicIdFromUrl(url) ||
+    ''
+  );
+
+  return {
+    url,
+    publicId,
+    public_id: publicId,
+    nombreOriginal: limpiarTextoFuente(item.nombreOriginal),
+    nombreArchivoOriginal: limpiarTextoFuente(item.nombreArchivoOriginal),
+    mimeType: limpiarTextoFuente(item.mimeType || item.mimetype),
+    tipo: limpiarTextoFuente(item.tipo || tipoDefault),
+    ubicacion: limpiarTextoFuente(item.ubicacion),
+    observacion: limpiarTextoFuente(item.observacion),
+    fechaSubida: normalizarFecha(item.fechaSubida) || null,
+    orden,
+    width: normalizarDimension(item.width),
+    height: normalizarDimension(item.height),
+    escaneada: Boolean(item.escaneada),
+    crop: item.crop || null
+  };
+}
+
+function construirFuentesPersistentes({
+  imagenes = [],
+  acta = null,
+  actaImagenes = []
+}) {
+  const evidenciasPrevias = imagenes
+    .filter((img) => img?.tipo === 'previa')
+    .map((img, index) => normalizarArchivoFuente(img, index, 'previa'));
+
+  const evidenciasPosteriores = imagenes
+    .filter((img) => img?.tipo === 'posterior')
+    .map((img, index) => normalizarArchivoFuente(img, index, 'posterior'));
+
+  return {
+    evidenciasPrevias,
+    evidenciasPosteriores,
+    acta: acta?.url ? normalizarArchivoFuente(acta, 0, 'acta') : {},
+    actaImagenes: actaImagenes.map((img, index) => normalizarArchivoFuente(img, index, 'acta_imagen'))
+  };
+}
+
+async function guardarFuentesPersistentesInforme(informe, fuentes) {
+  if (!informe || typeof informe.save !== 'function') {
+    return false;
+  }
+
+  informe.evidenciasPrevias = fuentes.evidenciasPrevias;
+  informe.evidenciasPosteriores = fuentes.evidenciasPosteriores;
+  informe.acta = fuentes.acta;
+  informe.actaImagenes = fuentes.actaImagenes;
+  informe.fuentesPersistentes = true;
+
+  if (!informe.versionActual || informe.versionActual < 1) {
+    informe.versionActual = 1;
+  }
+
+  await informe.save();
+
+  return true;
+}
+
 function validarSesionPermitida(req, sesionId) {
   if (!req.auth) {
     const err = new Error('Autenticación requerida');
@@ -507,18 +609,22 @@ router.get('/generar/:sesionId', async (req, res) => {
     }
   };
 
-  const cleanupEvidencesAsync = async (imagenes) => {
+  const cleanupEvidencesAsync = async (imagenes, options = {}) => {
     try {
-      for (const img of imagenes || []) {
-        const publicId = getPublicIdFromUrl(img.url);
+      const preserveCloudinary = options.preserveCloudinary === true;
 
-        if (publicId) {
-          try {
-            await cloudinary.uploader.destroy(publicId, {
-              resource_type: 'image'
-            });
-          } catch (err) {
-            console.warn(`No se pudo eliminar ${publicId} de Cloudinary:`, err?.message || err);
+      if (!preserveCloudinary) {
+        for (const img of imagenes || []) {
+          const publicId = getPublicIdFromUrl(img.url);
+
+          if (publicId) {
+            try {
+              await cloudinary.uploader.destroy(publicId, {
+                resource_type: 'image'
+              });
+            } catch (err) {
+              console.warn(`No se pudo eliminar ${publicId} de Cloudinary:`, err?.message || err);
+            }
           }
         }
       }
@@ -626,6 +732,21 @@ router.get('/generar/:sesionId', async (req, res) => {
     const store = actasEnMemoria[sesionId];
     const actaUrl = store?.acta?.url || store?.url || null;
     const actaPublicId = store?.acta?.public_id || store?.public_id || null;
+    const actaImgsArray = Array.isArray(store?.imagenes) ? store.imagenes : [];
+    const fuentesPersistentes = construirFuentesPersistentes({
+      imagenes,
+      acta: actaUrl
+        ? {
+            ...(store?.acta || {}),
+            url: actaUrl,
+            public_id: actaPublicId,
+            publicId: actaPublicId,
+            mimeType: 'application/pdf',
+            tipo: 'acta'
+          }
+        : null,
+      actaImagenes: actaImgsArray
+    });
 
     let hadActaPdf = false;
     let hadActaImgs = false;
@@ -644,15 +765,6 @@ router.get('/generar/:sesionId', async (req, res) => {
           console.warn(`El acta para ${sesionId} no es un PDF válido o no se pudo descargar`);
         }
 
-        if (actaPublicId) {
-          try {
-            await cloudinary.uploader.destroy(actaPublicId, {
-              resource_type: 'raw'
-            });
-          } catch (e) {
-            console.warn('No se pudo borrar acta en Cloudinary:', e?.message || e);
-          }
-        }
       } finally {
         if (fs.existsSync(actaPath)) fs.unlinkSync(actaPath);
 
@@ -664,7 +776,6 @@ router.get('/generar/:sesionId', async (req, res) => {
       }
     }
 
-    const actaImgsArray = Array.isArray(store?.imagenes) ? store.imagenes : [];
     let actaImgsPath = null;
     const actaImgsPublicIds = [];
 
@@ -715,18 +826,6 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     await merger.save(pdfFinalPath);
 
-    if (actaImgsPublicIds.length > 0) {
-      for (const pid of actaImgsPublicIds) {
-        try {
-          await cloudinary.uploader.destroy(pid, {
-            resource_type: 'image'
-          });
-        } catch (e) {
-          console.warn('No se pudo borrar imagen de acta en Cloudinary:', pid, e?.message || e);
-        }
-      }
-    }
-
     if (store && Array.isArray(store.imagenes)) {
       store.imagenes = [];
 
@@ -738,6 +837,7 @@ router.get('/generar/:sesionId', async (req, res) => {
     }
 
     let uploadMeta = null;
+    let fuentesGuardadas = false;
 
     try {
       const finalBuffer = fs.readFileSync(pdfFinalPath);
@@ -754,6 +854,8 @@ router.get('/generar/:sesionId', async (req, res) => {
         tienda: tiendaSeleccionada,
         geolocalizacion
       });
+
+      fuentesGuardadas = await guardarFuentesPersistentesInforme(uploadMeta, fuentesPersistentes);
     } catch (err) {
       console.error(`Error guardando informe ${sesionId}:`, err);
     }
@@ -777,7 +879,7 @@ router.get('/generar/:sesionId', async (req, res) => {
         });
       }
 
-      setImmediate(() => cleanupEvidencesAsync(imagenes));
+      setImmediate(() => cleanupEvidencesAsync(imagenes, { preserveCloudinary: fuentesGuardadas }));
 
       return res.status(201).json({
         ok: true,
@@ -805,7 +907,7 @@ router.get('/generar/:sesionId', async (req, res) => {
 
     return res.download(pdfFinalPath, `informe_tecnico_${sesionId}.pdf`, () => {
       cleanupTemps();
-      setImmediate(() => cleanupEvidencesAsync(imagenes));
+      setImmediate(() => cleanupEvidencesAsync(imagenes, { preserveCloudinary: fuentesGuardadas }));
     });
   } catch (err) {
     console.error('Error al generar PDF:', err);

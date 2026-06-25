@@ -5,7 +5,9 @@ const Informe = require('../models/informe');
 const {
   editarInforme,
   eliminarInforme,
-  eliminarInformesBulk
+  eliminarInformesBulk,
+  listarVersionesInforme,
+  obtenerVersionInforme
 } = require('../services/informeService');
 
 function sanitizePagination(page, limit) {
@@ -50,6 +52,33 @@ function mapInforme(informe) {
     ...informe,
     shareUrl: computeShareUrl(informe)
   };
+}
+
+async function obtenerInformePermitido(id, req) {
+  if (!mongoose.isValidObjectId(id)) {
+    const err = new Error('Id de informe inválido');
+    err.status = 400;
+    throw err;
+  }
+
+  const informe = await Informe.findById(id)
+    .populate('generatedBy', 'usuario nombre')
+    .populate('tiendaId', 'nombre regional departamento ciudad')
+    .lean();
+
+  if (!informe) {
+    const err = new Error('Informe no encontrado');
+    err.status = 404;
+    throw err;
+  }
+
+  if (!req.auth?.isAdmin && !esPropietario(informe, req.auth?.userId)) {
+    const err = new Error('No autorizado para consultar este informe');
+    err.status = 403;
+    throw err;
+  }
+
+  return informe;
 }
 
 router.get('/', async (req, res) => {
@@ -290,39 +319,72 @@ router.get('/tienda/:tiendaId', async (req, res) => {
   }
 });
 
+router.get('/:id/versiones', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { page, limit } = sanitizePagination(req.query.page, req.query.limit);
+
+    await obtenerInformePermitido(id, req);
+
+    const versiones = await listarVersionesInforme({
+      informeId: id,
+      page,
+      limit
+    });
+
+    res.set('Cache-Control', 'no-store');
+
+    return res.json({
+      ok: true,
+      ...versiones
+    });
+  } catch (err) {
+    console.error('Error consultando versiones del informe:', err);
+
+    return res.status(err.status || 500).json({
+      error: err.message || 'Error al consultar versiones del informe'
+    });
+  }
+});
+
+router.get('/:id/versiones/:versionId', async (req, res) => {
+  try {
+    const { id, versionId } = req.params;
+
+    await obtenerInformePermitido(id, req);
+
+    const version = await obtenerVersionInforme({
+      informeId: id,
+      versionId
+    });
+
+    res.set('Cache-Control', 'no-store');
+
+    return res.json({
+      ok: true,
+      version
+    });
+  } catch (err) {
+    console.error('Error consultando versión del informe:', err);
+
+    return res.status(err.status || 500).json({
+      error: err.message || 'Error al consultar versión del informe'
+    });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({
-        error: 'Id de informe inválido'
-      });
-    }
-
-    const inf = await Informe.findById(id)
-      .populate('generatedBy', 'usuario nombre')
-      .populate('tiendaId', 'nombre regional departamento ciudad')
-      .lean();
-
-    if (!inf) {
-      return res.status(404).json({
-        error: 'Informe no encontrado'
-      });
-    }
-
-    if (!req.auth?.isAdmin && !esPropietario(inf, req.auth?.userId)) {
-      return res.status(403).json({
-        error: 'No autorizado para consultar este informe'
-      });
-    }
+    const inf = await obtenerInformePermitido(id, req);
 
     return res.json(mapInforme(inf));
   } catch (err) {
     console.error('Error consultando informe:', err);
 
-    return res.status(500).json({
-      error: 'Error al consultar informe'
+    return res.status(err.status || 500).json({
+      error: err.message || 'Error al consultar informe'
     });
   }
 });
@@ -382,7 +444,8 @@ router.put('/:id', async (req, res) => {
       regional,
       includesActa,
       tiendaId,
-      geolocalizacion
+      geolocalizacion,
+      motivo
     } = req.body;
 
     const informe = await editarInforme({
@@ -392,7 +455,9 @@ router.put('/:id', async (req, res) => {
       regional,
       includesActa,
       tiendaId,
-      geolocalizacion
+      geolocalizacion,
+      editadoPor: req.auth.userId,
+      motivo
     });
 
     const informePlano = informe.toObject();

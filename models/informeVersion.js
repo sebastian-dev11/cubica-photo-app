@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 
-const geolocalizacionSchema = new mongoose.Schema(
+const { Schema } = mongoose;
+
+const geolocalizacionSchema = new Schema(
   {
     latitud: {
       type: Number,
@@ -47,7 +49,30 @@ const geolocalizacionSchema = new mongoose.Schema(
   }
 );
 
-const archivoSchema = new mongoose.Schema(
+const pdfSchema = new Schema(
+  {
+    url: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    publicId: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    mimeType: {
+      type: String,
+      trim: true,
+      default: 'application/pdf'
+    }
+  },
+  {
+    _id: false
+  }
+);
+
+const archivoSchema = new Schema(
   {
     url: {
       type: String,
@@ -98,10 +123,6 @@ const archivoSchema = new mongoose.Schema(
       type: Date,
       default: null
     },
-    orden: {
-      type: Number,
-      default: 0
-    },
     width: {
       type: Number,
       default: null
@@ -115,7 +136,7 @@ const archivoSchema = new mongoose.Schema(
       default: false
     },
     crop: {
-      type: mongoose.Schema.Types.Mixed,
+      type: Schema.Types.Mixed,
       default: null
     }
   },
@@ -124,25 +145,68 @@ const archivoSchema = new mongoose.Schema(
   }
 );
 
-const informeSchema = new mongoose.Schema(
+const cambioSchema = new Schema(
   {
+    campo: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    anterior: {
+      type: Schema.Types.Mixed,
+      default: null
+    },
+    nuevo: {
+      type: Schema.Types.Mixed,
+      default: null
+    }
+  },
+  {
+    _id: false
+  }
+);
+
+const informeVersionSchema = new Schema(
+  {
+    informeId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Informe',
+      required: true,
+      index: true
+    },
+    version: {
+      type: Number,
+      required: true,
+      min: 1
+    },
     title: {
       type: String,
-      required: true,
-      trim: true
+      trim: true,
+      default: ''
     },
     generatedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'UsuarioUnico'
+      type: Schema.Types.ObjectId,
+      ref: 'UsuarioUnico',
+      default: null
+    },
+    editadoPor: {
+      type: Schema.Types.ObjectId,
+      ref: 'UsuarioUnico',
+      default: null
     },
     sesionId: {
       type: String,
       trim: true,
       default: ''
     },
+    pdf: {
+      type: pdfSchema,
+      default: () => ({})
+    },
     url: {
       type: String,
-      required: true
+      trim: true,
+      default: ''
     },
     publicId: {
       type: String,
@@ -151,6 +215,7 @@ const informeSchema = new mongoose.Schema(
     },
     mimeType: {
       type: String,
+      trim: true,
       default: 'application/pdf'
     },
     includesActa: {
@@ -164,10 +229,11 @@ const informeSchema = new mongoose.Schema(
     },
     regional: {
       type: String,
+      trim: true,
       default: 'OTRA'
     },
     tiendaId: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: Schema.Types.ObjectId,
       ref: 'Tienda',
       default: null
     },
@@ -204,20 +270,6 @@ const informeSchema = new mongoose.Schema(
         origen: 'none'
       })
     },
-    versionActual: {
-      type: Number,
-      default: 1,
-      min: 1
-    },
-    editadoPor: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'UsuarioUnico',
-      default: null
-    },
-    editadoEn: {
-      type: Date,
-      default: null
-    },
     evidenciasPrevias: {
       type: [archivoSchema],
       default: []
@@ -234,28 +286,29 @@ const informeSchema = new mongoose.Schema(
       type: [archivoSchema],
       default: []
     },
-    fuentesPersistentes: {
-      type: Boolean,
-      default: false
+    cambios: {
+      type: [cambioSchema],
+      default: []
     },
-    createdAt: {
-      type: Date,
-      default: Date.now
+    motivo: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    snapshot: {
+      type: Schema.Types.Mixed,
+      default: null
     }
+  },
+  {
+    timestamps: true
   }
 );
 
-informeSchema.index({ createdAt: -1 });
-informeSchema.index({ generatedBy: 1, createdAt: -1 });
-informeSchema.index({ sesionId: 1, createdAt: -1 });
-informeSchema.index({ numeroIncidencia: 1, createdAt: -1 });
-informeSchema.index({ regional: 1, createdAt: -1 });
-informeSchema.index({ tiendaId: 1, createdAt: -1 });
-informeSchema.index({ tiendaNombre: 1, createdAt: -1 });
-informeSchema.index({ tiendaRegional: 1, createdAt: -1 });
-informeSchema.index({ versionActual: 1, createdAt: -1 });
-informeSchema.index({ editadoPor: 1, editadoEn: -1 });
-informeSchema.index({ fuentesPersistentes: 1, createdAt: -1 });
-informeSchema.index({ 'geolocalizacion.latitud': 1, 'geolocalizacion.longitud': 1 });
+informeVersionSchema.index({ informeId: 1, version: 1 }, { unique: true });
+informeVersionSchema.index({ informeId: 1, createdAt: -1 });
+informeVersionSchema.index({ editadoPor: 1, createdAt: -1 });
+informeVersionSchema.index({ numeroIncidencia: 1, createdAt: -1 });
+informeVersionSchema.index({ tiendaId: 1, createdAt: -1 });
 
-module.exports = mongoose.model('Informe', informeSchema);
+module.exports = mongoose.model('InformeVersion', informeVersionSchema);

@@ -5,6 +5,7 @@ const cors = require('cors');
 
 require('./models/UsuarioUnico');
 require('./models/informe');
+require('./models/informeVersion');
 require('./models/sesion');
 
 const authRoutes = require('./routes/auth');
