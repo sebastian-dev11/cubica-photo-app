@@ -72,13 +72,24 @@ function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
   const drawX = boxX + Math.floor((boxW - drawW) / 2);
   const drawY = boxY + Math.floor((boxH - drawH) / 2);
 
-  doc.image(imgBuffer, drawX, drawY, { width: drawW, height: drawH });
+  doc.image(imgBuffer, drawX, drawY, {
+    width: drawW,
+    height: drawH
+  });
 
-  return { drawX, drawY, drawW, drawH };
+  return {
+    drawX,
+    drawY,
+    drawW,
+    drawH
+  };
 }
 
 function getPublicIdFromUrl(url) {
-  const match = (url || '').match(/\/v\d+\/(.+)\.(jpg|png|jpeg|webp|gif|heic|heif|bmp|tif|tiff)/i);
+  const match = (url || '').match(
+    /\/v\d+\/(.+)\.(jpg|png|jpeg|webp|gif|heic|heif|bmp|tif|tiff)/i
+  );
+
   return match ? match[1] : null;
 }
 
@@ -101,6 +112,7 @@ function validarSesionPermitida(req, sesionId) {
 function cleanupTempsBySession(sesionId) {
   try {
     const tempDir = path.join(__dirname, '../uploads/temp');
+
     const toDelete = [
       path.join(tempDir, `pdf-imagenes-${sesionId}.pdf`),
       path.join(tempDir, `pdf-final-${sesionId}.pdf`),
@@ -109,24 +121,41 @@ function cleanupTempsBySession(sesionId) {
     ];
 
     for (const p of toDelete) {
-      if (fs.existsSync(p)) fs.unlinkSync(p);
+      if (fs.existsSync(p)) {
+        fs.unlinkSync(p);
+      }
     }
   } catch (e) {
-    console.warn('No se pudo limpiar temporales por sesión:', sesionId, e?.message || e);
+    console.warn(
+      'No se pudo limpiar temporales por sesión:',
+      sesionId,
+      e?.message || e
+    );
   }
 }
 
 async function destroyCloudinary(publicId, resourceType) {
   try {
-    if (!publicId) return { ok: false, error: 'publicId vacío' };
+    if (!publicId) {
+      return {
+        ok: false,
+        error: 'publicId vacío'
+      };
+    }
 
     const res = await cloudinary.uploader.destroy(publicId, {
       resource_type: resourceType
     });
 
-    return { ok: true, res };
+    return {
+      ok: true,
+      res
+    };
   } catch (e) {
-    return { ok: false, error: e?.message || String(e) };
+    return {
+      ok: false,
+      error: e?.message || String(e)
+    };
   }
 }
 
@@ -141,7 +170,9 @@ function normalizarFecha(valor) {
 
   const fecha = new Date(valor);
 
-  return Number.isNaN(fecha.getTime()) ? null : fecha;
+  return Number.isNaN(fecha.getTime())
+    ? null
+    : fecha;
 }
 
 function normalizarGeolocalizacionDesdeQuery(query = {}) {
@@ -170,7 +201,8 @@ function normalizarGeolocalizacionDesdeQuery(query = {}) {
   }
 
   const mapsUrl =
-    typeof query.mapsUrl === 'string' && query.mapsUrl.trim()
+    typeof query.mapsUrl === 'string' &&
+    query.mapsUrl.trim()
       ? query.mapsUrl.trim()
       : `https://www.google.com/maps?q=${latitud},${longitud}`;
 
@@ -179,10 +211,18 @@ function normalizarGeolocalizacionDesdeQuery(query = {}) {
     longitud,
     precision: normalizarNumero(query.precision),
     altitud: normalizarNumero(query.altitud),
-    precisionAltitud: normalizarNumero(query.precisionAltitud),
-    fechaCaptura: normalizarFecha(query.fechaCaptura) || new Date(),
+    precisionAltitud: normalizarNumero(
+      query.precisionAltitud
+    ),
+    fechaCaptura:
+      normalizarFecha(query.fechaCaptura) ||
+      new Date(),
     mapsUrl,
-    origen: ['browser', 'manual'].includes(query.geoOrigen) ? query.geoOrigen : 'browser'
+    origen: ['browser', 'manual'].includes(
+      query.geoOrigen
+    )
+      ? query.geoOrigen
+      : 'browser'
   };
 }
 
@@ -204,11 +244,14 @@ function formatearCoordenada(valor) {
 
 function formatearFechaGeo(fecha) {
   try {
-    return new Date(fecha).toLocaleString('es-CO', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-      timeZone: 'America/Bogota'
-    });
+    return new Date(fecha).toLocaleString(
+      'es-CO',
+      {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        timeZone: 'America/Bogota'
+      }
+    );
   } catch {
     return '';
   }
@@ -219,44 +262,89 @@ function renderGeolocalizacion(doc, geolocalizacion) {
     return;
   }
 
-  const latitud = formatearCoordenada(geolocalizacion.latitud);
-  const longitud = formatearCoordenada(geolocalizacion.longitud);
-  const precision = normalizarNumero(geolocalizacion.precision);
-  const fecha = formatearFechaGeo(geolocalizacion.fechaCaptura);
-  const precisionTexto = precision !== null ? ` | Precisión: ${Math.round(precision)} m` : '';
-  const fechaTexto = fecha ? ` | Capturada: ${fecha}` : '';
+  const latitud = formatearCoordenada(
+    geolocalizacion.latitud
+  );
+
+  const longitud = formatearCoordenada(
+    geolocalizacion.longitud
+  );
+
+  const precision = normalizarNumero(
+    geolocalizacion.precision
+  );
+
+  const fecha = formatearFechaGeo(
+    geolocalizacion.fechaCaptura
+  );
+
+  const precisionTexto =
+    precision !== null
+      ? ` | Precisión: ${Math.round(precision)} m`
+      : '';
+
+  const fechaTexto =
+    fecha
+      ? ` | Capturada: ${fecha}`
+      : '';
 
   doc.moveDown(0.3);
-  doc.fontSize(9).fillColor('gray').text(
-    `GPS: ${latitud}, ${longitud}${precisionTexto}${fechaTexto}`,
-    { align: 'center' }
-  );
+
+  doc
+    .fontSize(9)
+    .fillColor('gray')
+    .text(
+      `GPS: ${latitud}, ${longitud}${precisionTexto}${fechaTexto}`,
+      {
+        align: 'center'
+      }
+    );
 
   if (geolocalizacion.mapsUrl) {
     doc.moveDown(0.1);
-    doc.fontSize(9).fillColor('#003366').text(
-      'Ver ubicación en Google Maps',
-      {
-        align: 'center',
-        link: geolocalizacion.mapsUrl,
-        underline: true
-      }
-    );
+
+    doc
+      .fontSize(9)
+      .fillColor('#003366')
+      .text(
+        'Ver ubicación en Google Maps',
+        {
+          align: 'center',
+          link: geolocalizacion.mapsUrl,
+          underline: true
+        }
+      );
   }
 
   doc.fillColor('black');
 }
 
-function computeImagePageLayout(doc, pairsOnPage, contentTop, isFirstPage) {
+function computeImagePageLayout(
+  doc,
+  pairsOnPage,
+  contentTop,
+  isFirstPage
+) {
   const marginLeft = doc.page.margins.left;
   const marginRight = doc.page.margins.right;
   const marginTop = doc.page.margins.top;
   const marginBottom = doc.page.margins.bottom;
 
-  const availableWidth = doc.page.width - marginLeft - marginRight;
+  const availableWidth =
+    doc.page.width -
+    marginLeft -
+    marginRight;
+
   const gapX = 34;
-  const boxW = Math.floor((availableWidth - gapX) / 2);
-  const boxH = isFirstPage ? 205 : 225;
+
+  const boxW = Math.floor(
+    (availableWidth - gapX) / 2
+  );
+
+  const boxH =
+    isFirstPage
+      ? 205
+      : 225;
 
   const labelGap = 8;
   const labelH = 18;
@@ -265,14 +353,42 @@ function computeImagePageLayout(doc, pairsOnPage, contentTop, isFirstPage) {
   const lineGap = 16;
   const bottomGap = 18;
 
-  const pairStepY = boxH + labelGap + labelH + obsGap + obsReserve + lineGap + bottomGap;
+  const pairStepY =
+    boxH +
+    labelGap +
+    labelH +
+    obsGap +
+    obsReserve +
+    lineGap +
+    bottomGap;
 
-  const pageTop = isFirstPage ? contentTop + 18 : marginTop;
-  const pageBottom = doc.page.height - marginBottom;
-  const availableHeight = Math.max(0, pageBottom - pageTop);
-  const contentHeight = pairsOnPage * pairStepY;
+  const pageTop =
+    isFirstPage
+      ? contentTop + 18
+      : marginTop;
 
-  const startY = pageTop + Math.max(0, Math.floor((availableHeight - contentHeight) / 2));
+  const pageBottom =
+    doc.page.height -
+    marginBottom;
+
+  const availableHeight =
+    Math.max(
+      0,
+      pageBottom - pageTop
+    );
+
+  const contentHeight =
+    pairsOnPage *
+    pairStepY;
+
+  const startY =
+    pageTop +
+    Math.max(
+      0,
+      Math.floor(
+        (availableHeight - contentHeight) / 2
+      )
+    );
 
   return {
     startX: marginLeft,
@@ -286,8 +402,15 @@ function computeImagePageLayout(doc, pairsOnPage, contentTop, isFirstPage) {
   };
 }
 
-async function renderEvidencePairs(doc, pares, firstPageTopY) {
-  if (!Array.isArray(pares) || pares.length === 0) {
+async function renderEvidencePairs(
+  doc,
+  pares,
+  firstPageTopY
+) {
+  if (
+    !Array.isArray(pares) ||
+    pares.length === 0
+  ) {
     return;
   }
 
@@ -295,62 +418,196 @@ async function renderEvidencePairs(doc, pares, firstPageTopY) {
   let isFirstPage = true;
 
   while (index < pares.length) {
-    const pairsPerPage = isFirstPage ? 1 : 2;
-    const pagePairs = pares.slice(index, index + pairsPerPage);
+    const pairsPerPage =
+      isFirstPage
+        ? 1
+        : 2;
+
+    const pagePairs =
+      pares.slice(
+        index,
+        index + pairsPerPage
+      );
 
     if (!isFirstPage) {
       doc.addPage();
     }
 
-    const layout = computeImagePageLayout(doc, pagePairs.length, firstPageTopY, isFirstPage);
+    const layout =
+      computeImagePageLayout(
+        doc,
+        pagePairs.length,
+        firstPageTopY,
+        isFirstPage
+      );
 
-    for (let i = 0; i < pagePairs.length; i++) {
-      const { previa, posterior } = pagePairs[i];
-      const y = layout.startY + i * layout.pairStepY;
+    for (
+      let i = 0;
+      i < pagePairs.length;
+      i++
+    ) {
+      const {
+        previa,
+        posterior
+      } = pagePairs[i];
 
-      const previaUrl = isCloudinaryUrl(previa?.url) ? buildTransformedUrl(previa.url) : previa?.url;
-      const posteriorUrl = isCloudinaryUrl(posterior?.url) ? buildTransformedUrl(posterior.url) : posterior?.url;
+      const y =
+        layout.startY +
+        i * layout.pairStepY;
 
-      const previaBuf = await safeGetBuffer(previaUrl);
-      const posteriorBuf = await safeGetBuffer(posteriorUrl);
+      const previaUrl =
+        isCloudinaryUrl(previa?.url)
+          ? buildTransformedUrl(previa.url)
+          : previa?.url;
 
-      if (!previaBuf || !posteriorBuf) {
+      const posteriorUrl =
+        isCloudinaryUrl(posterior?.url)
+          ? buildTransformedUrl(posterior.url)
+          : posterior?.url;
+
+      const previaBuf =
+        await safeGetBuffer(previaUrl);
+
+      const posteriorBuf =
+        await safeGetBuffer(posteriorUrl);
+
+      if (
+        !previaBuf ||
+        !posteriorBuf
+      ) {
         continue;
       }
 
-      const leftX = layout.startX;
-      const rightX = layout.startX + layout.boxW + layout.gapX;
+      const leftX =
+        layout.startX;
 
-      centerImageInBox(doc, previaBuf, leftX, y, layout.boxW, layout.boxH);
-      centerImageInBox(doc, posteriorBuf, rightX, y, layout.boxW, layout.boxH);
+      const rightX =
+        layout.startX +
+        layout.boxW +
+        layout.gapX;
 
-      const labelsY = y + layout.boxH + layout.labelGap;
+      centerImageInBox(
+        doc,
+        previaBuf,
+        leftX,
+        y,
+        layout.boxW,
+        layout.boxH
+      );
 
-      doc.fontSize(12).fillColor('#003366')
-        .text('Antes de la instalación', leftX, labelsY, { width: layout.boxW, align: 'center' })
-        .text('Después de la instalación', rightX, labelsY, { width: layout.boxW, align: 'center' });
+      centerImageInBox(
+        doc,
+        posteriorBuf,
+        rightX,
+        y,
+        layout.boxW,
+        layout.boxH
+      );
 
-      const obsY = labelsY + 20;
+      const labelsY =
+        y +
+        layout.boxH +
+        layout.labelGap;
+
+      doc
+        .fontSize(12)
+        .fillColor('#003366')
+        .text(
+          'Antes de la instalación',
+          leftX,
+          labelsY,
+          {
+            width: layout.boxW,
+            align: 'center'
+          }
+        )
+        .text(
+          'Después de la instalación',
+          rightX,
+          labelsY,
+          {
+            width: layout.boxW,
+            align: 'center'
+          }
+        );
+
+      const obsY =
+        labelsY + 20;
+
       let maxObsHeight = 0;
 
-      doc.fontSize(9).fillColor('gray');
+      doc
+        .fontSize(9)
+        .fillColor('gray');
 
       if (previa.observacion) {
-        const h = doc.heightOfString(previa.observacion, { width: layout.boxW });
-        doc.text(previa.observacion, leftX, obsY, { width: layout.boxW, align: 'center' });
-        maxObsHeight = Math.max(maxObsHeight, h);
+        const h =
+          doc.heightOfString(
+            previa.observacion,
+            {
+              width: layout.boxW
+            }
+          );
+
+        doc.text(
+          previa.observacion,
+          leftX,
+          obsY,
+          {
+            width: layout.boxW,
+            align: 'center'
+          }
+        );
+
+        maxObsHeight =
+          Math.max(
+            maxObsHeight,
+            h
+          );
       }
 
       if (posterior.observacion) {
-        const h = doc.heightOfString(posterior.observacion, { width: layout.boxW });
-        doc.text(posterior.observacion, rightX, obsY, { width: layout.boxW, align: 'center' });
-        maxObsHeight = Math.max(maxObsHeight, h);
+        const h =
+          doc.heightOfString(
+            posterior.observacion,
+            {
+              width: layout.boxW
+            }
+          );
+
+        doc.text(
+          posterior.observacion,
+          rightX,
+          obsY,
+          {
+            width: layout.boxW,
+            align: 'center'
+          }
+        );
+
+        maxObsHeight =
+          Math.max(
+            maxObsHeight,
+            h
+          );
       }
 
-      const lineY = obsY + maxObsHeight + 14;
+      const lineY =
+        obsY +
+        maxObsHeight +
+        14;
 
-      doc.moveTo(layout.startX, lineY)
-        .lineTo(layout.startX + layout.boxW * 2 + layout.gapX, lineY)
+      doc
+        .moveTo(
+          layout.startX,
+          lineY
+        )
+        .lineTo(
+          layout.startX +
+          layout.boxW * 2 +
+          layout.gapX,
+          lineY
+        )
         .strokeColor('#cccccc')
         .lineWidth(0.5)
         .stroke();
@@ -361,391 +618,1087 @@ async function renderEvidencePairs(doc, pares, firstPageTopY) {
   }
 }
 
-router.post('/session/reset/:sesionId', async (req, res) => {
-  const { sesionId } = req.params;
+router.post(
+  '/session/reset/:sesionId',
+  async (req, res) => {
+    const { sesionId } = req.params;
 
-  try {
-    if (!sesionId || typeof sesionId !== 'string') {
-      return res.status(400).json({
-        ok: false,
-        error: 'sesionId inválido'
-      });
-    }
-
-    validarSesionPermitida(req, sesionId);
-
-    const deleted = {
-      imagenesN: 0,
-      actaPdf: false,
-      actaImgsN: 0
-    };
-
-    const imagenes = await Imagen.find({ sesionId }).lean();
-
-    for (const img of imagenes) {
-      const pid = getPublicIdFromUrl(img?.url);
-
-      if (pid) {
-        const r = await destroyCloudinary(pid, 'image');
-
-        if (!r.ok) {
-          console.warn('No se pudo borrar evidencia en Cloudinary:', pid, r.error);
-        }
-      }
-    }
-
-    if (imagenes.length > 0) {
-      await Imagen.deleteMany({ sesionId });
-      deleted.imagenesN = imagenes.length;
-    }
-
-    const store = actasEnMemoria[sesionId];
-
-    if (store && typeof store === 'object') {
-      if (store.acta && store.acta.public_id) {
-        const r = await destroyCloudinary(store.acta.public_id, 'raw');
-
-        if (!r.ok) {
-          console.warn('No se pudo borrar acta en Cloudinary:', store.acta.public_id, r.error);
-        }
-
-        deleted.actaPdf = true;
+    try {
+      if (
+        !sesionId ||
+        typeof sesionId !== 'string'
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: 'sesionId inválido'
+        });
       }
 
-      if (Array.isArray(store.imagenes) && store.imagenes.length > 0) {
-        for (const it of store.imagenes) {
-          if (it?.public_id) {
-            const r = await destroyCloudinary(it.public_id, 'image');
+      validarSesionPermitida(
+        req,
+        sesionId
+      );
 
-            if (!r.ok) {
-              console.warn('No se pudo borrar imagen de acta en Cloudinary:', it.public_id, r.error);
-            }
+      const deleted = {
+        imagenesN: 0,
+        actaPdf: false,
+        actaImgsN: 0
+      };
 
-            deleted.actaImgsN += 1;
+      const imagenes =
+        await Imagen
+          .find({ sesionId })
+          .lean();
+
+      for (const img of imagenes) {
+        const pid =
+          getPublicIdFromUrl(
+            img?.url
+          );
+
+        if (pid) {
+          const r =
+            await destroyCloudinary(
+              pid,
+              'image'
+            );
+
+          if (!r.ok) {
+            console.warn(
+              'No se pudo borrar evidencia en Cloudinary:',
+              pid,
+              r.error
+            );
           }
         }
       }
 
-      delete actasEnMemoria[sesionId];
-    }
+      if (imagenes.length > 0) {
+        await Imagen.deleteMany({
+          sesionId
+        });
 
-    cleanupTempsBySession(sesionId);
+        deleted.imagenesN =
+          imagenes.length;
+      }
 
-    return res.status(200).json({
-      ok: true,
-      deleted
-    });
-  } catch (e) {
-    console.error('Error en reset de sesión:', sesionId, e?.message || e);
+      const store =
+        actasEnMemoria[sesionId];
 
-    return res.status(e.status || 500).json({
-      ok: false,
-      error: e.status ? e.message : 'Error interno al resetear sesión'
-    });
-  }
-});
+      if (
+        store &&
+        typeof store === 'object'
+      ) {
+        if (
+          store.acta &&
+          store.acta.public_id
+        ) {
+          const r =
+            await destroyCloudinary(
+              store.acta.public_id,
+              'raw'
+            );
 
-router.get('/generar/:sesionId', async (req, res) => {
-  const { sesionId } = req.params;
-  const tiendaId = (req.query.tiendaId || '').toString().trim();
-  const wantsJson = req.query.format === 'json' || (req.get('accept') || '').includes('application/json');
-  const numeroIncidencia = (req.query.numeroIncidencia || '').toString().trim();
-  const geolocalizacion = normalizarGeolocalizacionDesdeQuery(req.query);
+          if (!r.ok) {
+            console.warn(
+              'No se pudo borrar acta en Cloudinary:',
+              store.acta.public_id,
+              r.error
+            );
+          }
 
-  let ubicacion = req.query.ubicacion || 'Sitio no especificado';
-  let regionalStr = '';
-  let regionalBd = 'OTRA';
-  let tiendaSeleccionada = null;
+          deleted.actaPdf = true;
+        }
 
-  try {
-    validarSesionPermitida(req, sesionId);
-  } catch (err) {
-    if (wantsJson) {
-      return res.status(err.status || 500).json({
+        if (
+          Array.isArray(store.imagenes) &&
+          store.imagenes.length > 0
+        ) {
+          for (
+            const it of store.imagenes
+          ) {
+            if (it?.public_id) {
+              const r =
+                await destroyCloudinary(
+                  it.public_id,
+                  'image'
+                );
+
+              if (!r.ok) {
+                console.warn(
+                  'No se pudo borrar imagen de acta en Cloudinary:',
+                  it.public_id,
+                  r.error
+                );
+              }
+
+              deleted.actaImgsN += 1;
+            }
+          }
+        }
+
+        delete actasEnMemoria[sesionId];
+      }
+
+      cleanupTempsBySession(sesionId);
+
+      return res.status(200).json({
+        ok: true,
+        deleted
+      });
+    } catch (e) {
+      console.error(
+        'Error en reset de sesión:',
+        sesionId,
+        e?.message || e
+      );
+
+      return res.status(
+        e.status || 500
+      ).json({
         ok: false,
-        error: err.message
+        error:
+          e.status
+            ? e.message
+            : 'Error interno al resetear sesión'
       });
     }
-
-    return res.status(err.status || 500).send(err.message);
   }
+);
 
-  if (tiendaId) {
+router.get(
+  '/generar/:sesionId',
+  async (req, res) => {
+    const { sesionId } = req.params;
+
+    const tiendaId =
+      (
+        req.query.tiendaId ||
+        ''
+      )
+        .toString()
+        .trim();
+
+    const wantsJson =
+      req.query.format === 'json' ||
+      (
+        req.get('accept') ||
+        ''
+      ).includes(
+        'application/json'
+      );
+
+    const numeroIncidencia =
+      (
+        req.query.numeroIncidencia ||
+        ''
+      )
+        .toString()
+        .trim();
+
+    const geolocalizacion =
+      normalizarGeolocalizacionDesdeQuery(
+        req.query
+      );
+
+    let ubicacion =
+      req.query.ubicacion ||
+      'Sitio no especificado';
+
+    let regionalStr = '';
+    let regionalBd = 'OTRA';
+    let tiendaSeleccionada = null;
+
     try {
-      const tienda = await Tienda.findById(tiendaId).lean();
-
-      if (tienda) {
-        tiendaSeleccionada = tienda;
-        ubicacion = `${tienda.nombre} - ${tienda.departamento}, ${tienda.ciudad}`;
-        regionalStr = `Regional: ${tienda.regional}`;
-        regionalBd = tienda.regional;
-      }
-    } catch (e) {
-      console.warn('No se pudo obtener la tienda para el PDF:', e?.message || e);
-    }
-  }
-
-  const tempDir = path.join(__dirname, '../uploads/temp');
-
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
-
-  const pdfImagenesPath = path.join(tempDir, `pdf-imagenes-${sesionId}.pdf`);
-  const pdfFinalPath = path.join(tempDir, `pdf-final-${sesionId}.pdf`);
-
-  const cleanupTemps = () => {
-    try {
-      if (fs.existsSync(pdfImagenesPath)) fs.unlinkSync(pdfImagenesPath);
-      if (fs.existsSync(pdfFinalPath)) fs.unlinkSync(pdfFinalPath);
-
-      const maybeActaImgsPath = path.join(tempDir, `acta-imgs-${sesionId}.pdf`);
-
-      if (fs.existsSync(maybeActaImgsPath)) fs.unlinkSync(maybeActaImgsPath);
-    } catch (e) {
-      console.warn('No se pudo limpiar temporales:', e?.message || e);
-    }
-  };
-
-  const cleanupSessionAssetsAsync = async ({
-    imagenes = [],
-    actaPublicId = null,
-    actaImgsPublicIds = []
-  }) => {
-    try {
-      for (const img of imagenes) {
-        const publicId =
-          img?.public_id ||
-          img?.publicId ||
-          getPublicIdFromUrl(img?.url);
-
-        if (!publicId) continue;
-
-        try {
-          await cloudinary.uploader.destroy(publicId, {
-            resource_type: 'image'
-          });
-        } catch (err) {
-          console.warn(`No se pudo eliminar ${publicId} de Cloudinary:`, err?.message || err);
-        }
-      }
-
-      if (actaPublicId) {
-        try {
-          await cloudinary.uploader.destroy(actaPublicId, {
-            resource_type: 'raw'
-          });
-        } catch (err) {
-          console.warn(`No se pudo eliminar ${actaPublicId} de Cloudinary:`, err?.message || err);
-        }
-      }
-
-      for (const publicId of actaImgsPublicIds) {
-        if (!publicId) continue;
-
-        try {
-          await cloudinary.uploader.destroy(publicId, {
-            resource_type: 'image'
-          });
-        } catch (err) {
-          console.warn(`No se pudo eliminar ${publicId} de Cloudinary:`, err?.message || err);
-        }
-      }
-
-      await Imagen.deleteMany({ sesionId });
-      delete actasEnMemoria[sesionId];
-    } catch (e) {
-      console.warn('No se pudieron limpiar los archivos de la sesión:', e?.message || e);
-    }
-  };
-
-  try {
-    const imagenes = await Imagen.find({ sesionId }).sort({ fechaSubida: 1 });
-
-    if (imagenes.length === 0) {
+      validarSesionPermitida(
+        req,
+        sesionId
+      );
+    } catch (err) {
       if (wantsJson) {
-        return res.status(404).json({
+        return res.status(
+          err.status || 500
+        ).json({
           ok: false,
-          error: 'No hay imágenes para esta sesión'
+          error: err.message
         });
       }
 
-      return res.status(404).send('No hay imágenes para esta sesión');
+      return res.status(
+        err.status || 500
+      ).send(
+        err.message
+      );
     }
 
-    await new Promise(async (resolve, reject) => {
+    if (tiendaId) {
       try {
-        const doc = new PDFDocument({ margin: 50 });
-        const stream = fs.createWriteStream(pdfImagenesPath);
+        const tienda =
+          await Tienda
+            .findById(tiendaId)
+            .lean();
 
-        doc.pipe(stream);
+        if (tienda) {
+          tiendaSeleccionada =
+            tienda;
 
-        const fechaActual = new Date().toLocaleString('es-CO', {
-          dateStyle: 'full',
-          timeStyle: 'short',
-          timeZone: 'America/Bogota'
-        });
+          ubicacion =
+            `${tienda.nombre} - ` +
+            `${tienda.departamento}, ` +
+            `${tienda.ciudad}`;
 
-        const logoCubicaBuf = await safeGetBuffer(buildLogoUrl(LOGO_CUBICA_URL));
+          regionalStr =
+            `Regional: ${tienda.regional}`;
 
-        if (logoCubicaBuf) {
-          doc.image(logoCubicaBuf, doc.page.width - 150, 40, { width: 120 });
+          regionalBd =
+            tienda.regional;
+        }
+      } catch (e) {
+        console.warn(
+          'No se pudo obtener la tienda para el PDF:',
+          e?.message || e
+        );
+      }
+    }
+
+    const tempDir =
+      path.join(
+        __dirname,
+        '../uploads/temp'
+      );
+
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(
+        tempDir,
+        {
+          recursive: true
+        }
+      );
+    }
+
+    const pdfImagenesPath =
+      path.join(
+        tempDir,
+        `pdf-imagenes-${sesionId}.pdf`
+      );
+
+    const pdfFinalPath =
+      path.join(
+        tempDir,
+        `pdf-final-${sesionId}.pdf`
+      );
+
+    const cleanupTemps = () => {
+      try {
+        if (
+          fs.existsSync(
+            pdfImagenesPath
+          )
+        ) {
+          fs.unlinkSync(
+            pdfImagenesPath
+          );
         }
 
-        const logoD1Buf = await safeGetBuffer(buildLogoUrl(LOGO_D1_URL));
-
-        if (logoD1Buf) {
-          doc.image(logoD1Buf, 50, 40, { width: 100 });
+        if (
+          fs.existsSync(
+            pdfFinalPath
+          )
+        ) {
+          fs.unlinkSync(
+            pdfFinalPath
+          );
         }
 
-        doc.fillColor('black').fontSize(24).text('Informe técnico', 50, 100, { align: 'center' });
-        doc.moveDown();
-        doc.fontSize(14).text(ubicacion, { align: 'center' });
-        doc.moveDown(0.5);
-        doc.fontSize(12).text(`Generado: ${fechaActual}`, { align: 'center' });
+        const maybeActaImgsPath =
+          path.join(
+            tempDir,
+            `acta-imgs-${sesionId}.pdf`
+          );
 
-        if (numeroIncidencia) {
-          const display = numeroIncidencia.toString().replace(/\s+/g, ' ').trim();
+        if (
+          fs.existsSync(
+            maybeActaImgsPath
+          )
+        ) {
+          fs.unlinkSync(
+            maybeActaImgsPath
+          );
+        }
+      } catch (e) {
+        console.warn(
+          'No se pudo limpiar temporales:',
+          e?.message || e
+        );
+      }
+    };
 
-          doc.moveDown(0.3);
-          doc.fontSize(12).fillColor('black').text(`Incidencia: ${display}`, { align: 'center' });
+    const destroyCloudinaryWithRetry = async (
+      publicId,
+      resourceType,
+      maxAttempts = 3
+    ) => {
+      if (!publicId) {
+        return {
+          ok: false,
+          reason: 'publicId vacío'
+        };
+      }
+
+      let lastError = null;
+
+      for (
+        let attempt = 1;
+        attempt <= maxAttempts;
+        attempt++
+      ) {
+        try {
+          const result =
+            await cloudinary.uploader.destroy(
+              publicId,
+              {
+                resource_type:
+                  resourceType,
+                invalidate: true
+              }
+            );
+
+          if (
+            result?.result === 'ok' ||
+            result?.result === 'not found'
+          ) {
+            return {
+              ok: true,
+              result:
+                result?.result ||
+                'ok'
+            };
+          }
+
+          lastError =
+            new Error(
+              `Cloudinary respondió: ${
+                result?.result ||
+                'resultado desconocido'
+              }`
+            );
+        } catch (err) {
+          lastError = err;
         }
 
-        if (regionalStr) {
-          doc.moveDown(0.3);
-          doc.fontSize(12).fillColor('black').text(regionalStr, { align: 'center' });
+        if (
+          attempt < maxAttempts
+        ) {
+          await new Promise(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                attempt * 500
+              )
+          );
+        }
+      }
+
+      return {
+        ok: false,
+        error:
+          lastError?.message ||
+          'No se pudo eliminar el archivo'
+      };
+    };
+
+    const cleanupSessionAssetsAsync = async ({
+      imagenes = [],
+      actaPublicId = null,
+      actaImgsPublicIds = []
+    }) => {
+      const imageResults = [];
+
+      try {
+        for (const img of imagenes) {
+          const publicId =
+            img?.public_id ||
+            img?.publicId ||
+            getPublicIdFromUrl(
+              img?.url
+            );
+
+          if (!publicId) {
+            console.warn(
+              'No se encontró public_id para eliminar evidencia:',
+              img?._id?.toString() ||
+              img?.url ||
+              'imagen desconocida'
+            );
+
+            imageResults.push({
+              imageId:
+                img?._id?.toString() ||
+                null,
+              publicId: null,
+              ok: false
+            });
+
+            continue;
+          }
+
+          const result =
+            await destroyCloudinaryWithRetry(
+              publicId,
+              'image'
+            );
+
+          if (!result.ok) {
+            console.warn(
+              `No se pudo eliminar ${publicId} de Cloudinary:`,
+              result.error ||
+              result.reason
+            );
+          }
+
+          imageResults.push({
+            imageId:
+              img?._id?.toString() ||
+              null,
+            publicId,
+            ok: result.ok
+          });
         }
 
-        renderGeolocalizacion(doc, geolocalizacion);
+        let actaDeleted = true;
 
-        doc.moveDown(1.5);
-        doc.fontSize(10).fillColor('gray').text(
-          'Este informe contiene evidencia fotográfica del antes y después de la instalación.',
-          { align: 'center', lineGap: 2 }
+        if (actaPublicId) {
+          const result =
+            await destroyCloudinaryWithRetry(
+              actaPublicId,
+              'raw'
+            );
+
+          actaDeleted =
+            result.ok;
+
+          if (!result.ok) {
+            console.warn(
+              `No se pudo eliminar el acta ${actaPublicId} de Cloudinary:`,
+              result.error ||
+              result.reason
+            );
+          }
+        }
+
+        const actaImageResults = [];
+
+        for (
+          const publicId of
+          actaImgsPublicIds
+        ) {
+          if (!publicId) {
+            actaImageResults.push({
+              publicId: null,
+              ok: false
+            });
+
+            continue;
+          }
+
+          const result =
+            await destroyCloudinaryWithRetry(
+              publicId,
+              'image'
+            );
+
+          if (!result.ok) {
+            console.warn(
+              `No se pudo eliminar imagen de acta ${publicId} de Cloudinary:`,
+              result.error ||
+              result.reason
+            );
+          }
+
+          actaImageResults.push({
+            publicId,
+            ok: result.ok
+          });
+        }
+
+        const failedImageIds =
+          imageResults
+            .filter(
+              (item) =>
+                !item.ok &&
+                item.imageId
+            )
+            .map(
+              (item) =>
+                item.imageId
+            );
+
+        if (
+          failedImageIds.length > 0
+        ) {
+          const successfulImageIds =
+            imageResults
+              .filter(
+                (item) =>
+                  item.ok &&
+                  item.imageId
+              )
+              .map(
+                (item) =>
+                  item.imageId
+              );
+
+          if (
+            successfulImageIds.length > 0
+          ) {
+            await Imagen.deleteMany({
+              _id: {
+                $in:
+                  successfulImageIds
+              },
+              sesionId
+            });
+          }
+
+          console.warn(
+            `La sesión ${sesionId} conserva ${failedImageIds.length} registro(s) de evidencia porque no se pudieron eliminar correctamente de Cloudinary.`
+          );
+        } else {
+          await Imagen.deleteMany({
+            sesionId
+          });
+        }
+
+        const allActaImagesDeleted =
+          actaImageResults.every(
+            (item) =>
+              item.ok
+          );
+
+        if (
+          actaDeleted &&
+          allActaImagesDeleted
+        ) {
+          delete actasEnMemoria[
+            sesionId
+          ];
+        } else {
+          console.warn(
+            `Se conserva temporalmente la información del acta de la sesión ${sesionId} porque algunos archivos no pudieron eliminarse de Cloudinary.`
+          );
+        }
+
+        const failedImages =
+          imageResults.filter(
+            (item) =>
+              !item.ok
+          ).length;
+
+        const failedActaImages =
+          actaImageResults.filter(
+            (item) =>
+              !item.ok
+          ).length;
+
+        console.log(
+          `Limpieza de sesión ${sesionId} finalizada. ` +
+          `Evidencias eliminadas: ` +
+          `${imageResults.length - failedImages}/${imageResults.length}. ` +
+          `Imágenes de acta eliminadas: ` +
+          `${actaImageResults.length - failedActaImages}/${actaImageResults.length}. ` +
+          `Acta PDF eliminada: ` +
+          `${actaPublicId ? actaDeleted : true}.`
         );
 
-        const firstPageTopY = doc.y;
+        return {
+          ok:
+            failedImages === 0 &&
+            failedActaImages === 0 &&
+            actaDeleted,
+          failedImages,
+          failedActaImages,
+          actaDeleted
+        };
+      } catch (e) {
+        console.warn(
+          'No se pudieron limpiar los archivos de la sesión:',
+          e?.message || e
+        );
 
-        const previas = imagenes.filter((img) => img.tipo === 'previa');
-        const posteriores = imagenes.filter((img) => img.tipo === 'posterior');
-        const pares = [];
-        const minLength = Math.min(previas.length, posteriores.length);
+        return {
+          ok: false,
+          error:
+            e?.message ||
+            String(e)
+        };
+      }
+    };
 
-        for (let i = 0; i < minLength; i++) {
-          pares.push({
-            previa: previas[i],
-            posterior: posteriores[i]
+    try {
+      const imagenes =
+        await Imagen
+          .find({ sesionId })
+          .sort({
+            fechaSubida: 1
+          });
+
+      if (
+        imagenes.length === 0
+      ) {
+        if (wantsJson) {
+          return res.status(404).json({
+            ok: false,
+            error:
+              'No hay imágenes para esta sesión'
           });
         }
 
-        await renderEvidencePairs(doc, pares, firstPageTopY);
-
-        doc.end();
-
-        stream.on('finish', resolve);
-        stream.on('error', reject);
-      } catch (err) {
-        reject(err);
+        return res.status(404).send(
+          'No hay imágenes para esta sesión'
+        );
       }
-    });
 
-    const merger = new PDFMerger();
+      await new Promise(
+        async (
+          resolve,
+          reject
+        ) => {
+          try {
+            const doc =
+              new PDFDocument({
+                margin: 50
+              });
+
+            const stream =
+              fs.createWriteStream(
+                pdfImagenesPath
+              );
+
+            doc.pipe(stream);
+
+            const fechaActual =
+              new Date().toLocaleString(
+                'es-CO',
+                {
+                  dateStyle: 'full',
+                  timeStyle: 'short',
+                  timeZone:
+                    'America/Bogota'
+                }
+              );
+
+            const logoCubicaBuf =
+              await safeGetBuffer(
+                buildLogoUrl(
+                  LOGO_CUBICA_URL
+                )
+              );
+
+            if (logoCubicaBuf) {
+              doc.image(
+                logoCubicaBuf,
+                doc.page.width - 150,
+                40,
+                {
+                  width: 120
+                }
+              );
+            }
+
+            const logoD1Buf =
+              await safeGetBuffer(
+                buildLogoUrl(
+                  LOGO_D1_URL
+                )
+              );
+
+            if (logoD1Buf) {
+              doc.image(
+                logoD1Buf,
+                50,
+                40,
+                {
+                  width: 100
+                }
+              );
+            }
+
+            doc
+              .fillColor('black')
+              .fontSize(24)
+              .text(
+                'Informe técnico',
+                50,
+                100,
+                {
+                  align: 'center'
+                }
+              );
+
+            doc.moveDown();
+
+            doc
+              .fontSize(14)
+              .text(
+                ubicacion,
+                {
+                  align: 'center'
+                }
+              );
+
+            doc.moveDown(0.5);
+
+            doc
+              .fontSize(12)
+              .text(
+                `Generado: ${fechaActual}`,
+                {
+                  align: 'center'
+                }
+              );
+
+            if (numeroIncidencia) {
+              const display =
+                numeroIncidencia
+                  .toString()
+                  .replace(
+                    /\s+/g,
+                    ' '
+                  )
+                  .trim();
+
+              doc.moveDown(0.3);
+
+              doc
+                .fontSize(12)
+                .fillColor('black')
+                .text(
+                  `Incidencia: ${display}`,
+                  {
+                    align: 'center'
+                  }
+                );
+            }
+
+            if (regionalStr) {
+              doc.moveDown(0.3);
+
+              doc
+                .fontSize(12)
+                .fillColor('black')
+                .text(
+                  regionalStr,
+                  {
+                    align: 'center'
+                  }
+                );
+            }
+
+            renderGeolocalizacion(
+              doc,
+              geolocalizacion
+            );
+
+            doc.moveDown(1.5);
+
+            doc
+              .fontSize(10)
+              .fillColor('gray')
+              .text(
+                'Este informe contiene evidencia fotográfica del antes y después de la instalación.',
+                {
+                  align: 'center',
+                  lineGap: 2
+                }
+              );
+
+            const firstPageTopY =
+              doc.y;
+
+            const previas =
+              imagenes.filter(
+                (img) =>
+                  img.tipo === 'previa'
+              );
+
+            const posteriores =
+              imagenes.filter(
+                (img) =>
+                  img.tipo === 'posterior'
+              );
+
+            const pares = [];
+
+            const minLength =
+              Math.min(
+                previas.length,
+                posteriores.length
+              );
+
+            for (
+              let i = 0;
+              i < minLength;
+              i++
+            ) {
+              pares.push({
+                previa:
+                  previas[i],
+                posterior:
+                  posteriores[i]
+              });
+            }
+
+            await renderEvidencePairs(
+              doc,
+              pares,
+              firstPageTopY
+            );
+
+            doc.end();
+
+            stream.on(
+              'finish',
+              resolve
+            );
+
+            stream.on(
+              'error',
+              reject
+            );
+          } catch (err) {
+            reject(err);
+          }
+        }
+      );
+          const merger = new PDFMerger();
 
     const store = actasEnMemoria[sesionId];
-    const actaUrl = store?.acta?.url || store?.url || null;
-    const actaPublicId = store?.acta?.public_id || store?.public_id || null;
-    const actaImgsArray = Array.isArray(store?.imagenes) ? store.imagenes : [];
-    const actaImgsPublicIds = actaImgsArray
-      .map((item) => item?.public_id || item?.publicId || null)
-      .filter(Boolean);
+    const actaUrl =
+      store?.acta?.url ||
+      store?.url ||
+      null;
+
+    const actaPublicId =
+      store?.acta?.public_id ||
+      store?.public_id ||
+      null;
+
+    const actaImgsArray =
+      Array.isArray(store?.imagenes)
+        ? store.imagenes
+        : [];
+
+    const actaImgsPublicIds =
+      actaImgsArray
+        .map(
+          (item) =>
+            item?.public_id ||
+            item?.publicId ||
+            null
+        )
+        .filter(Boolean);
 
     let hadActaPdf = false;
     let hadActaImgs = false;
 
     if (actaUrl) {
-      const actaPath = path.join(tempDir, `acta-${sesionId}.pdf`);
+      const actaPath =
+        path.join(
+          tempDir,
+          `acta-${sesionId}.pdf`
+        );
 
       try {
-        const actaBuf = await safeGetBuffer(actaUrl);
+        const actaBuf =
+          await safeGetBuffer(actaUrl);
 
-        if (actaBuf && actaBuf.slice(0, 4).toString('utf8') === '%PDF') {
-          fs.writeFileSync(actaPath, actaBuf);
-          await merger.add(actaPath);
+        if (
+          actaBuf &&
+          actaBuf
+            .slice(0, 4)
+            .toString('utf8') === '%PDF'
+        ) {
+          fs.writeFileSync(
+            actaPath,
+            actaBuf
+          );
+
+          await merger.add(
+            actaPath
+          );
+
           hadActaPdf = true;
         } else {
-          console.warn(`El acta para ${sesionId} no es un PDF válido o no se pudo descargar`);
+          console.warn(
+            `El acta para ${sesionId} no es un PDF válido o no se pudo descargar`
+          );
         }
       } finally {
-        if (fs.existsSync(actaPath)) fs.unlinkSync(actaPath);
+        if (
+          fs.existsSync(
+            actaPath
+          )
+        ) {
+          fs.unlinkSync(
+            actaPath
+          );
+        }
       }
     }
 
     let actaImgsPath = null;
 
-    if (actaImgsArray.length > 0) {
-      actaImgsPath = path.join(tempDir, `acta-imgs-${sesionId}.pdf`);
+    if (
+      actaImgsArray.length > 0
+    ) {
+      actaImgsPath =
+        path.join(
+          tempDir,
+          `acta-imgs-${sesionId}.pdf`
+        );
 
-      await new Promise(async (resolve, reject) => {
-        try {
-          const doc = new PDFDocument({ autoFirstPage: false, margin: 40 });
-          const stream = fs.createWriteStream(actaImgsPath);
+      await new Promise(
+        async (
+          resolve,
+          reject
+        ) => {
+          try {
+            const doc =
+              new PDFDocument({
+                autoFirstPage: false,
+                margin: 40
+              });
 
-          doc.pipe(stream);
+            const stream =
+              fs.createWriteStream(
+                actaImgsPath
+              );
 
-          for (const it of actaImgsArray) {
-            const imgUrl = isCloudinaryUrl(it?.url) ? buildTransformedUrl(it.url) : it?.url;
-            const imgBuf = await safeGetBuffer(imgUrl);
+            doc.pipe(stream);
 
-            if (!imgBuf) continue;
+            for (
+              const it of actaImgsArray
+            ) {
+              const imgUrl =
+                isCloudinaryUrl(
+                  it?.url
+                )
+                  ? buildTransformedUrl(
+                      it.url
+                    )
+                  : it?.url;
 
-            doc.addPage();
+              const imgBuf =
+                await safeGetBuffer(
+                  imgUrl
+                );
 
-            const boxX = doc.page.margins.left;
-            const boxY = doc.page.margins.top;
-            const boxW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-            const boxH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
+              if (!imgBuf) {
+                continue;
+              }
 
-            centerImageInBox(doc, imgBuf, boxX, boxY, boxW, boxH);
+              doc.addPage();
+
+              const boxX =
+                doc.page.margins.left;
+
+              const boxY =
+                doc.page.margins.top;
+
+              const boxW =
+                doc.page.width -
+                doc.page.margins.left -
+                doc.page.margins.right;
+
+              const boxH =
+                doc.page.height -
+                doc.page.margins.top -
+                doc.page.margins.bottom;
+
+              centerImageInBox(
+                doc,
+                imgBuf,
+                boxX,
+                boxY,
+                boxW,
+                boxH
+              );
+            }
+
+            doc.end();
+
+            stream.on(
+              'finish',
+              resolve
+            );
+
+            stream.on(
+              'error',
+              reject
+            );
+          } catch (err) {
+            reject(err);
           }
-
-          doc.end();
-
-          stream.on('finish', resolve);
-          stream.on('error', reject);
-        } catch (err) {
-          reject(err);
         }
-      });
+      );
 
-      if (fs.existsSync(actaImgsPath)) {
-        await merger.add(actaImgsPath);
+      if (
+        fs.existsSync(
+          actaImgsPath
+        )
+      ) {
+        await merger.add(
+          actaImgsPath
+        );
+
         hadActaImgs = true;
       }
     }
 
-    await merger.add(pdfImagenesPath);
+    await merger.add(
+      pdfImagenesPath
+    );
 
-    await merger.save(pdfFinalPath);
+    await merger.save(
+      pdfFinalPath
+    );
 
     let uploadMeta = null;
 
     try {
-      const finalBuffer = fs.readFileSync(pdfFinalPath);
+      const finalBuffer =
+        fs.readFileSync(
+          pdfFinalPath
+        );
 
-      uploadMeta = await guardarInforme({
-        title: `Informe técnico ${sesionId}`,
-        generatedBy: req.auth.userId,
-        sesionId,
-        buffer: finalBuffer,
-        includesActa: hadActaPdf || hadActaImgs,
-        numeroIncidencia,
-        regional: regionalBd,
-        tiendaId: tiendaSeleccionada?._id || tiendaId || null,
-        tienda: tiendaSeleccionada,
-        geolocalizacion
-      });
+      uploadMeta =
+        await guardarInforme({
+          title:
+            `Informe técnico ${sesionId}`,
+          generatedBy:
+            req.auth.userId,
+          sesionId,
+          buffer:
+            finalBuffer,
+          includesActa:
+            hadActaPdf ||
+            hadActaImgs,
+          numeroIncidencia,
+          regional:
+            regionalBd,
+          tiendaId:
+            tiendaSeleccionada?._id ||
+            tiendaId ||
+            null,
+          tienda:
+            tiendaSeleccionada,
+          geolocalizacion
+        });
     } catch (err) {
-      console.error(`Error guardando informe ${sesionId}:`, err);
+      console.error(
+        `Error guardando informe ${sesionId}:`,
+        err
+      );
     }
 
     if (wantsJson) {
@@ -761,64 +1714,104 @@ router.get('/generar/:sesionId', async (req, res) => {
       if (!cloudUrl) {
         return res.status(500).json({
           ok: false,
-          error: 'No se obtuvo URL del informe en Cloudinary'
+          error:
+            'No se obtuvo URL del informe en Cloudinary'
         });
       }
 
-      setImmediate(() => cleanupSessionAssetsAsync({
+      await cleanupSessionAssetsAsync({
         imagenes,
         actaPublicId,
         actaImgsPublicIds
-      }));
+      });
 
       return res.status(201).json({
         ok: true,
-        id: uploadMeta?._id?.toString() || null,
-        url: cloudUrl,
-        publicId: uploadMeta?.publicId || null,
-        includesActa: hadActaPdf || hadActaImgs,
+        id:
+          uploadMeta?._id?.toString() ||
+          null,
+        url:
+          cloudUrl,
+        publicId:
+          uploadMeta?.publicId ||
+          null,
+        includesActa:
+          hadActaPdf ||
+          hadActaImgs,
         sesionId,
-        tiendaId: tiendaSeleccionada?._id?.toString() || tiendaId || null,
-        tienda: tiendaSeleccionada
-          ? {
-              _id: tiendaSeleccionada._id?.toString(),
-              nombre: tiendaSeleccionada.nombre,
-              regional: tiendaSeleccionada.regional,
-              departamento: tiendaSeleccionada.departamento,
-              ciudad: tiendaSeleccionada.ciudad
-            }
-          : null,
+        tiendaId:
+          tiendaSeleccionada?._id?.toString() ||
+          tiendaId ||
+          null,
+        tienda:
+          tiendaSeleccionada
+            ? {
+                _id:
+                  tiendaSeleccionada._id?.toString(),
+                nombre:
+                  tiendaSeleccionada.nombre,
+                regional:
+                  tiendaSeleccionada.regional,
+                departamento:
+                  tiendaSeleccionada.departamento,
+                ciudad:
+                  tiendaSeleccionada.ciudad
+              }
+            : null,
         ubicacion,
-        numeroIncidencia: numeroIncidencia || '',
-        generatedBy: req.auth.userId,
+        numeroIncidencia:
+          numeroIncidencia ||
+          '',
+        generatedBy:
+          req.auth.userId,
         geolocalizacion
       });
     }
 
-    return res.download(pdfFinalPath, `informe_tecnico_${sesionId}.pdf`, (downloadError) => {
-      cleanupTemps();
+    return res.download(
+      pdfFinalPath,
+      `informe_tecnico_${sesionId}.pdf`,
+      (downloadError) => {
+        cleanupTemps();
 
-      if (!downloadError) {
-        setImmediate(() => cleanupSessionAssetsAsync({
-          imagenes,
-          actaPublicId,
-          actaImgsPublicIds
-        }));
+        if (!downloadError) {
+          cleanupSessionAssetsAsync({
+            imagenes,
+            actaPublicId,
+            actaImgsPublicIds
+          }).catch(
+            (cleanupError) => {
+              console.warn(
+                'Error durante la limpieza posterior a la descarga:',
+                cleanupError?.message ||
+                cleanupError
+              );
+            }
+          );
+        }
       }
-    });
+    );
   } catch (err) {
-    console.error('Error al generar PDF:', err);
+    console.error(
+      'Error al generar PDF:',
+      err
+    );
+
     cleanupTemps();
 
     if (wantsJson) {
       return res.status(500).json({
         ok: false,
-        error: 'Error al generar el PDF'
+        error:
+          'Error al generar el PDF'
       });
     }
 
-    return res.status(500).send('Error al generar el PDF');
+    return res.status(500).send(
+      'Error al generar el PDF'
+    );
   }
 });
 
 module.exports = router;
+
