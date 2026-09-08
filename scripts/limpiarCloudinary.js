@@ -15,6 +15,7 @@ const permitirSinInformes = argumentos.includes('--permitir-sin-informes');
 const idsImagenesProtegidas = new Set([
   'LOGO_CUBICA_NUEVO_v3rsq5',
   'D1_LOGO_NUEVO_kj1bdh',
+  'LOGO_CUBICA_TRANSPARENTE_gfjdep',
   ...String(process.env.CLOUDINARY_PROTECTED_PUBLIC_IDS || '')
     .split(',')
     .map((valor) => valor.trim())
