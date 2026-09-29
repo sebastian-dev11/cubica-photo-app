@@ -27,6 +27,7 @@
     "pdf-merger-js": "^4.3.1",
     "pdfkit": "^0.17.1",
     "sharp": "^0.35.2",
-    "streamifier": "^0.1.1"
+    "streamifier": "^0.1.1",
+    "xlsx": "^0.18.5"
   }
 }
