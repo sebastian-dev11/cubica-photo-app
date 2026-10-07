@@ -16,6 +16,17 @@ function slugify(str) {
     .slice(0, 80);
 }
 
+function construirNombreArchivoInforme(numeroIncidencia, tiendaNombre) {
+  const incidencia = limpiarTexto(numeroIncidencia) || 'SIN INCIDENCIA';
+  const tienda = limpiarTexto(tiendaNombre) || 'SIN TIENDA';
+
+  return `INFORME TÉCNICO - ${incidencia} - ${tienda}`
+    .replace(/[\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .trim();
+}
+
 function esPDF(buffer) {
   return buffer.slice(0, 4).toString() === '%PDF';
 }
@@ -420,7 +431,7 @@ async function guardarInforme({
 
   if (!buffer || !Buffer.isBuffer(buffer)) {
     throw new Error('El buffer del PDF es obligatorio y debe ser un Buffer válido.');
-  }
+    }
 
   if (!esPDF(buffer)) {
     throw new Error('El archivo no parece ser un PDF válido.');
@@ -438,9 +449,11 @@ async function guardarInforme({
     generatedBy = sesion?.usuarioId || null;
   }
 
-  const baseId = slugify(title);
-  const hash8 = crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 8);
-  const publicId = `${baseId}_${hash8}.pdf`;
+  const baseId = construirNombreArchivoInforme(
+    numeroIncidencia,
+    tiendaNormalizada.tiendaNombre
+  );
+  const publicId = `${baseId}.pdf`;
 
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
