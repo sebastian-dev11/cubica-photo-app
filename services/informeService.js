@@ -88,7 +88,8 @@ function normalizarGeolocalizacion(geolocalizacion = null) {
   }
 
   const mapsUrl =
-    typeof geolocalizacion.mapsUrl === 'string' && geolocalizacion.mapsUrl.trim()
+    typeof geolocalizacion.mapsUrl === 'string' &&
+    geolocalizacion.mapsUrl.trim()
       ? geolocalizacion.mapsUrl.trim()
       : `https://www.google.com/maps?q=${latitud},${longitud}`;
 
@@ -162,7 +163,11 @@ function valorComparable(valor) {
     return valor._id.toString();
   }
 
-  if (valor && typeof valor.toString === 'function' && valor.constructor?.name === 'ObjectId') {
+  if (
+    valor &&
+    typeof valor.toString === 'function' &&
+    valor.constructor?.name === 'ObjectId'
+  ) {
     return valor.toString();
   }
 
@@ -199,7 +204,8 @@ function limpiarObjetoParaComparar(valor) {
 }
 
 function sonIguales(anterior, nuevo) {
-  return JSON.stringify(limpiarObjetoParaComparar(anterior)) === JSON.stringify(limpiarObjetoParaComparar(nuevo));
+  return JSON.stringify(limpiarObjetoParaComparar(anterior)) ===
+    JSON.stringify(limpiarObjetoParaComparar(nuevo));
 }
 
 function agregarCambio(cambios, campo, anterior, nuevo) {
@@ -213,7 +219,9 @@ function agregarCambio(cambios, campo, anterior, nuevo) {
 }
 
 function normalizarArchivoVersion(item = {}) {
-  const plain = typeof item.toObject === 'function' ? item.toObject() : item;
+  const plain = typeof item.toObject === 'function'
+    ? item.toObject()
+    : item;
 
   return {
     url: limpiarTexto(plain.url),
@@ -299,7 +307,10 @@ async function guardarVersionActual({
   motivo = ''
 }) {
   const snapshot = crearSnapshotInforme(informe);
-  const version = await obtenerNumeroVersionDisponible(informe._id, snapshot.versionActual || 1);
+  const version = await obtenerNumeroVersionDisponible(
+    informe._id,
+    snapshot.versionActual || 1
+  );
 
   await InformeVersion.create({
     informeId: informe._id,
@@ -427,33 +438,51 @@ async function guardarInforme({
   geolocalizacion = null,
   overwrite = false
 }) {
-  if (!title) throw new Error('El título es obligatorio.');
+  if (!title) {
+    throw new Error('El título es obligatorio.');
+  }
 
   if (!buffer || !Buffer.isBuffer(buffer)) {
     throw new Error('El buffer del PDF es obligatorio y debe ser un Buffer válido.');
-    }
+  }
 
   if (!esPDF(buffer)) {
     throw new Error('El archivo no parece ser un PDF válido.');
   }
 
-  const sesionIdNormalizado = typeof sesionId === 'string' ? sesionId.trim() : '';
-  const geolocalizacionNormalizada = normalizarGeolocalizacion(geolocalizacion);
+  const sesionIdNormalizado =
+    typeof sesionId === 'string' ? sesionId.trim() : '';
+
+  const geolocalizacionNormalizada =
+    normalizarGeolocalizacion(geolocalizacion);
+
   const tiendaNormalizada = await resolverTiendaInforme({
     tiendaId,
     tienda
   });
 
   if (!generatedBy && sesionIdNormalizado) {
-    const sesion = await Sesion.findOne({ sesionId: sesionIdNormalizado });
+    const sesion = await Sesion.findOne({
+      sesionId: sesionIdNormalizado
+    });
+
     generatedBy = sesion?.usuarioId || null;
   }
 
-  const baseId = construirNombreArchivoInforme(
+  const nombreArchivo = construirNombreArchivoInforme(
     numeroIncidencia,
     tiendaNormalizada.tiendaNombre
   );
-  const publicId = `${baseId}.pdf`;
+
+  const hashContenido = crypto
+    .createHash('sha256')
+    .update(buffer)
+    .digest('hex')
+    .slice(0, 12);
+
+  const sufijoUnico = crypto.randomBytes(4).toString('hex');
+
+  const publicId = `${slugify(nombreArchivo)}_${hashContenido}_${sufijoUnico}`;
 
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
@@ -462,10 +491,13 @@ async function guardarInforme({
         folder: 'informes',
         public_id: publicId,
         overwrite,
-        format: 'pdf'
+        format: 'pdf',
+        filename_override: `${nombreArchivo}.pdf`
       },
       async (error, result) => {
-        if (error) return reject(error);
+        if (error) {
+          return reject(error);
+        }
 
         try {
           const informe = await Informe.create({
@@ -495,7 +527,10 @@ async function guardarInforme({
               resource_type: 'raw'
             });
           } catch (cleanupErr) {
-            console.warn('No se pudo limpiar asset en Cloudinary tras fallo de DB:', cleanupErr?.message || cleanupErr);
+            console.warn(
+              'No se pudo limpiar asset en Cloudinary tras fallo de DB:',
+              cleanupErr?.message || cleanupErr
+            );
           }
 
           reject(dbErr);
@@ -520,7 +555,9 @@ async function resolverAuth({
   }
 
   if (requesterSesionId) {
-    const sesion = await Sesion.findOne({ sesionId: requesterSesionId }).lean();
+    const sesion = await Sesion.findOne({
+      sesionId: requesterSesionId
+    }).lean();
 
     if (sesion?.usuarioId) {
       resolvedUserId = sesion.usuarioId.toString();
@@ -531,7 +568,10 @@ async function resolverAuth({
     }
   }
 
-  return { resolvedUserId, isAdmin: admin };
+  return {
+    resolvedUserId,
+    isAdmin: admin
+  };
 }
 
 function verificarAutorizacionEliminacion({
@@ -541,7 +581,9 @@ function verificarAutorizacionEliminacion({
 }) {
   if (isAdmin) return;
 
-  const ownerId = informe?.generatedBy ? informe.generatedBy.toString() : null;
+  const ownerId = informe?.generatedBy
+    ? informe.generatedBy.toString()
+    : null;
 
   if (!ownerId || !resolvedUserId || ownerId !== resolvedUserId) {
     const err = new Error('No autorizado para eliminar este informe.');
@@ -570,7 +612,10 @@ async function eliminarInforme({
     throw err;
   }
 
-  const { resolvedUserId, isAdmin: isAdminEff } = await resolverAuth({
+  const {
+    resolvedUserId,
+    isAdmin: isAdminEff
+  } = await resolverAuth({
     requesterUserId,
     requesterSesionId,
     isAdmin
@@ -586,22 +631,31 @@ async function eliminarInforme({
 
   if (informe.publicId) {
     try {
-      const resp = await cloudinary.uploader.destroy(informe.publicId, {
-        resource_type: 'raw',
-        invalidate: true
-      });
+      const resp = await cloudinary.uploader.destroy(
+        informe.publicId,
+        {
+          resource_type: 'raw',
+          invalidate: true
+        }
+      );
 
       cloudResult = resp?.result || 'ok';
     } catch (e) {
-      const err = new Error(`Fallo al eliminar en Cloudinary: ${e?.message || e}`);
+      const err = new Error(
+        `Fallo al eliminar en Cloudinary: ${e?.message || e}`
+      );
       err.status = 502;
       throw err;
     }
   }
 
-  await Informe.deleteOne({ _id: id });
+  await Informe.deleteOne({
+    _id: id
+  });
 
-  return { cloudResult };
+  return {
+    cloudResult
+  };
 }
 
 async function editarInforme({
@@ -636,11 +690,15 @@ async function editarInforme({
   ) {
     const existente = await Informe.findOne({
       numeroIncidencia: numeroIncidencia.trim(),
-      _id: { $ne: id }
+      _id: {
+        $ne: id
+      }
     });
 
     if (existente) {
-      const err = new Error('Ya existe un informe con ese número de incidencia.');
+      const err = new Error(
+        'Ya existe un informe con ese número de incidencia.'
+      );
       err.status = 400;
       throw err;
     }
@@ -651,22 +709,46 @@ async function editarInforme({
 
   if (typeof title === 'string') {
     valoresNuevos.title = title.trim();
-    agregarCambio(cambios, 'title', informe.title, valoresNuevos.title);
+
+    agregarCambio(
+      cambios,
+      'title',
+      informe.title,
+      valoresNuevos.title
+    );
   }
 
   if (typeof numeroIncidencia === 'string') {
     valoresNuevos.numeroIncidencia = numeroIncidencia.trim();
-    agregarCambio(cambios, 'numeroIncidencia', informe.numeroIncidencia, valoresNuevos.numeroIncidencia);
+
+    agregarCambio(
+      cambios,
+      'numeroIncidencia',
+      informe.numeroIncidencia,
+      valoresNuevos.numeroIncidencia
+    );
   }
 
   if (typeof regional === 'string') {
     valoresNuevos.regional = regional.trim();
-    agregarCambio(cambios, 'regional', informe.regional, valoresNuevos.regional);
+
+    agregarCambio(
+      cambios,
+      'regional',
+      informe.regional,
+      valoresNuevos.regional
+    );
   }
 
   if (typeof includesActa === 'boolean') {
     valoresNuevos.includesActa = includesActa;
-    agregarCambio(cambios, 'includesActa', informe.includesActa, valoresNuevos.includesActa);
+
+    agregarCambio(
+      cambios,
+      'includesActa',
+      informe.includesActa,
+      valoresNuevos.includesActa
+    );
   }
 
   if (tiendaId !== undefined || tienda !== undefined) {
@@ -678,23 +760,62 @@ async function editarInforme({
     valoresNuevos.tiendaId = tiendaNormalizada.tiendaId;
     valoresNuevos.tiendaNombre = tiendaNormalizada.tiendaNombre;
     valoresNuevos.tiendaRegional = tiendaNormalizada.tiendaRegional;
-    valoresNuevos.tiendaDepartamento = tiendaNormalizada.tiendaDepartamento;
+    valoresNuevos.tiendaDepartamento =
+      tiendaNormalizada.tiendaDepartamento;
     valoresNuevos.tiendaCiudad = tiendaNormalizada.tiendaCiudad;
 
-    agregarCambio(cambios, 'tiendaId', valorComparable(informe.tiendaId), valorComparable(valoresNuevos.tiendaId));
-    agregarCambio(cambios, 'tiendaNombre', informe.tiendaNombre, valoresNuevos.tiendaNombre);
-    agregarCambio(cambios, 'tiendaRegional', informe.tiendaRegional, valoresNuevos.tiendaRegional);
-    agregarCambio(cambios, 'tiendaDepartamento', informe.tiendaDepartamento, valoresNuevos.tiendaDepartamento);
-    agregarCambio(cambios, 'tiendaCiudad', informe.tiendaCiudad, valoresNuevos.tiendaCiudad);
+    agregarCambio(
+      cambios,
+      'tiendaId',
+      valorComparable(informe.tiendaId),
+      valorComparable(valoresNuevos.tiendaId)
+    );
+
+    agregarCambio(
+      cambios,
+      'tiendaNombre',
+      informe.tiendaNombre,
+      valoresNuevos.tiendaNombre
+    );
+
+    agregarCambio(
+      cambios,
+      'tiendaRegional',
+      informe.tiendaRegional,
+      valoresNuevos.tiendaRegional
+    );
+
+    agregarCambio(
+      cambios,
+      'tiendaDepartamento',
+      informe.tiendaDepartamento,
+      valoresNuevos.tiendaDepartamento
+    );
+
+    agregarCambio(
+      cambios,
+      'tiendaCiudad',
+      informe.tiendaCiudad,
+      valoresNuevos.tiendaCiudad
+    );
   }
 
   if (geolocalizacion !== undefined) {
-    valoresNuevos.geolocalizacion = normalizarGeolocalizacion(geolocalizacion);
-    agregarCambio(cambios, 'geolocalizacion', informe.geolocalizacion, valoresNuevos.geolocalizacion);
+    valoresNuevos.geolocalizacion =
+      normalizarGeolocalizacion(geolocalizacion);
+
+    agregarCambio(
+      cambios,
+      'geolocalizacion',
+      informe.geolocalizacion,
+      valoresNuevos.geolocalizacion
+    );
   }
 
   if (cambios.length > 0) {
-    const nuevaVersionActualSugerida = await calcularSiguienteVersionActual(informe);
+    const nuevaVersionActualSugerida =
+      await calcularSiguienteVersionActual(informe);
+
     const pdfRegenerado = await intentarRegenerarPdfInforme({
       informe,
       valoresNuevos,
@@ -709,10 +830,16 @@ async function editarInforme({
       valoresNuevos.includesActa = pdfRegenerado.includesActa;
 
       if (pdfRegenerado.fuentes) {
-        valoresNuevos.evidenciasPrevias = pdfRegenerado.fuentes.evidenciasPrevias;
-        valoresNuevos.evidenciasPosteriores = pdfRegenerado.fuentes.evidenciasPosteriores;
+        valoresNuevos.evidenciasPrevias =
+          pdfRegenerado.fuentes.evidenciasPrevias;
+
+        valoresNuevos.evidenciasPosteriores =
+          pdfRegenerado.fuentes.evidenciasPosteriores;
+
         valoresNuevos.acta = pdfRegenerado.fuentes.acta;
-        valoresNuevos.actaImagenes = pdfRegenerado.fuentes.actaImagenes;
+        valoresNuevos.actaImagenes =
+          pdfRegenerado.fuentes.actaImagenes;
+
         valoresNuevos.fuentesPersistentes = true;
       }
     }
@@ -750,15 +877,24 @@ async function listarVersionesInforme({
   }
 
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
-  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+  const limitNum = Math.min(
+    100,
+    Math.max(1, parseInt(limit, 10) || 20)
+  );
 
-  const total = await InformeVersion.countDocuments({ informeId });
+  const total = await InformeVersion.countDocuments({
+    informeId
+  });
 
-  const data = await InformeVersion.find({ informeId })
+  const data = await InformeVersion.find({
+    informeId
+  })
     .populate('generatedBy', 'usuario nombre')
     .populate('editadoPor', 'usuario nombre')
     .populate('tiendaId', 'nombre regional departamento ciudad')
-    .sort({ version: -1 })
+    .sort({
+      version: -1
+    })
     .skip((pageNum - 1) * limitNum)
     .limit(limitNum)
     .lean();
@@ -812,7 +948,9 @@ async function eliminarInformesBulk({
   isAdmin = false
 }) {
   if (!Array.isArray(ids) || ids.length === 0) {
-    const err = new Error('Debe enviar un arreglo "ids" con al menos un id.');
+    const err = new Error(
+      'Debe enviar un arreglo "ids" con al menos un id.'
+    );
     err.status = 400;
     throw err;
   }
