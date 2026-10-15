@@ -1,12 +1,15 @@
 const axios = require('axios');
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
+const previewRouter = express.Router();
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 const PDFMerger = require('pdf-merger-js');
 
 const Imagen = require('../models/imagen');
+const Informe = require('../models/informe');
 const { actasEnMemoria } = require('./acta');
 const Tienda = require('../models/tienda');
 const { guardarInforme } = require('../services/informeService');
@@ -33,6 +36,129 @@ function construirNombreArchivoDescarga(numeroIncidencia, tiendaNombre) {
     .replace(/[. ]+$/g, '')
     .trim();
 }
+
+function obtenerSecretoVistaPrevia() {
+  return process.env.PDF_PREVIEW_SECRET || process.env.JWT_SECRET || process.env.TOKEN_SECRET || '';
+}
+
+function crearTokenVistaPrevia(informeId, nombreArchivo) {
+  const secret = obtenerSecretoVistaPrevia();
+
+  if (!secret) {
+    throw new Error('Falta configurar la clave para firmar la vista previa del PDF');
+  }
+
+  const payload = Buffer.from(JSON.stringify({
+    id: String(informeId),
+    filename: nombreArchivo,
+    exp: Date.now() + 24 * 60 * 60 * 1000
+  })).toString('base64url');
+
+  const signature = crypto
+    .createHmac('sha256', secret)
+    .update(payload)
+    .digest('base64url');
+
+  return `${payload}.${signature}`;
+}
+
+function verificarTokenVistaPrevia(token) {
+  const partes = typeof token === 'string' ? token.split('.') : [];
+
+  if (partes.length !== 2) return null;
+
+  const [payloadCodificado, firmaRecibida] = partes;
+  const secret = obtenerSecretoVistaPrevia();
+
+  if (!secret) return null;
+
+  const firmaEsperada = crypto
+    .createHmac('sha256', secret)
+    .update(payloadCodificado)
+    .digest('base64url');
+
+  const recibida = Buffer.from(firmaRecibida);
+  const esperada = Buffer.from(firmaEsperada);
+
+  if (recibida.length !== esperada.length || !crypto.timingSafeEqual(recibida, esperada)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(payloadCodificado, 'base64url').toString('utf8'));
+
+    if (
+      typeof payload.id !== 'string' ||
+      typeof payload.filename !== 'string' ||
+      !payload.filename.toLowerCase().endsWith('.pdf') ||
+      !Number.isFinite(payload.exp) ||
+      payload.exp <= Date.now()
+    ) {
+      return null;
+    }
+
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function normalizarUrlPdfCloudinary(url) {
+  if (typeof url !== 'string') return '';
+
+  return url.replace(/\/raw\/upload\/fl_attachment:[^/]+\//i, '/raw/upload/');
+}
+
+function construirUrlVistaPrevia(req, token) {
+  const protocolo = String(req.get('x-forwarded-proto') || req.protocol)
+    .split(',')[0]
+    .trim();
+  const host = req.get('host');
+
+  return `${protocolo}://${host}/pdf-preview/${token}`;
+}
+
+previewRouter.get('/:token', async (req, res) => {
+  const payload = verificarTokenVistaPrevia(req.params.token);
+
+  if (!payload) {
+    return res.status(404).send('El enlace de vista previa no es válido o ha vencido.');
+  }
+
+  try {
+    const informe = await Informe.findById(payload.id).lean();
+
+    if (!informe || !informe.url) {
+      return res.status(404).send('No se encontró el informe solicitado.');
+    }
+
+    const urlPdf = normalizarUrlPdfCloudinary(informe.url);
+    const respuesta = await axios.get(urlPdf, {
+      responseType: 'arraybuffer',
+      timeout: 30000,
+      maxContentLength: 100 * 1024 * 1024
+    });
+
+    const nombreAscii = payload.filename
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\x20-\x7E]/g, '_')
+      .replace(/["\\]/g, '_');
+
+    const nombreCodificado = encodeURIComponent(payload.filename)
+      .replace(/[!'()*]/g, caracter => `%${caracter.charCodeAt(0).toString(16).toUpperCase()}`);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${nombreAscii}"; filename*=UTF-8''${nombreCodificado}`);
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    return res.status(200).send(Buffer.from(respuesta.data));
+  } catch (error) {
+    console.error('Error cargando la vista previa del informe:', error?.message || error);
+    return res.status(502).send('No fue posible cargar el PDF.');
+  }
+});
 
 function isCloudinaryUrl(url) {
   return typeof url === 'string' && /res\.cloudinary\.com/.test(url);
@@ -1025,7 +1151,8 @@ router.get(
           'No se pudo eliminar el archivo'
       };
     };
-        const cleanupSessionAssetsAsync = async ({
+
+    const cleanupSessionAssetsAsync = async ({
       imagenes = [],
       actaPublicId = null,
       actaImgsPublicIds = []
@@ -1488,353 +1615,373 @@ router.get(
           }
         }
       );
-                const merger = new PDFMerger();
 
-    const store = actasEnMemoria[sesionId];
-    const actaUrl =
-      store?.acta?.url ||
-      store?.url ||
-      null;
+      const merger = new PDFMerger();
 
-    const actaPublicId =
-      store?.acta?.public_id ||
-      store?.public_id ||
-      null;
+      const store = actasEnMemoria[sesionId];
+      const actaUrl =
+        store?.acta?.url ||
+        store?.url ||
+        null;
 
-    const actaImgsArray =
-      Array.isArray(store?.imagenes)
-        ? store.imagenes
-        : [];
+      const actaPublicId =
+        store?.acta?.public_id ||
+        store?.public_id ||
+        null;
 
-    const actaImgsPublicIds =
-      actaImgsArray
-        .map(
-          (item) =>
-            item?.public_id ||
-            item?.publicId ||
-            null
-        )
-        .filter(Boolean);
+      const actaImgsArray =
+        Array.isArray(store?.imagenes)
+          ? store.imagenes
+          : [];
 
-    let hadActaPdf = false;
-    let hadActaImgs = false;
-
-    if (actaUrl) {
-      const actaPath =
-        path.join(
-          tempDir,
-          `acta-${sesionId}.pdf`
-        );
-
-      try {
-        const actaBuf =
-          await safeGetBuffer(actaUrl);
-
-        if (
-          actaBuf &&
-          actaBuf
-            .slice(0, 4)
-            .toString('utf8') === '%PDF'
-        ) {
-          fs.writeFileSync(
-            actaPath,
-            actaBuf
-          );
-
-          await merger.add(
-            actaPath
-          );
-
-          hadActaPdf = true;
-        } else {
-          console.warn(
-            `El acta para ${sesionId} no es un PDF válido o no se pudo descargar`
-          );
-        }
-      } finally {
-        if (
-          fs.existsSync(
-            actaPath
+      const actaImgsPublicIds =
+        actaImgsArray
+          .map(
+            (item) =>
+              item?.public_id ||
+              item?.publicId ||
+              null
           )
-        ) {
-          fs.unlinkSync(
-            actaPath
+          .filter(Boolean);
+
+      let hadActaPdf = false;
+      let hadActaImgs = false;
+
+      if (actaUrl) {
+        const actaPath =
+          path.join(
+            tempDir,
+            `acta-${sesionId}.pdf`
           );
-        }
-      }
-    }
 
-    let actaImgsPath = null;
+        try {
+          const actaBuf =
+            await safeGetBuffer(actaUrl);
 
-    if (
-      actaImgsArray.length > 0
-    ) {
-      actaImgsPath =
-        path.join(
-          tempDir,
-          `acta-imgs-${sesionId}.pdf`
-        );
-
-      await new Promise(
-        async (
-          resolve,
-          reject
-        ) => {
-          try {
-            const doc =
-              new PDFDocument({
-                autoFirstPage: false,
-                margin: 40
-              });
-
-            const stream =
-              fs.createWriteStream(
-                actaImgsPath
-              );
-
-            doc.pipe(stream);
-
-            for (
-              const it of actaImgsArray
-            ) {
-              const imgUrl =
-                isCloudinaryUrl(
-                  it?.url
-                )
-                  ? buildTransformedUrl(
-                      it.url
-                    )
-                  : it?.url;
-
-              const imgBuf =
-                await safeGetBuffer(
-                  imgUrl
-                );
-
-              if (!imgBuf) {
-                continue;
-              }
-
-              doc.addPage();
-
-              const boxX =
-                doc.page.margins.left;
-
-              const boxY =
-                doc.page.margins.top;
-
-              const boxW =
-                doc.page.width -
-                doc.page.margins.left -
-                doc.page.margins.right;
-
-              const boxH =
-                doc.page.height -
-                doc.page.margins.top -
-                doc.page.margins.bottom;
-
-              centerImageInBox(
-                doc,
-                imgBuf,
-                boxX,
-                boxY,
-                boxW,
-                boxH
-              );
-            }
-
-            doc.end();
-
-            stream.on(
-              'finish',
-              resolve
+          if (
+            actaBuf &&
+            actaBuf
+              .slice(0, 4)
+              .toString('utf8') === '%PDF'
+          ) {
+            fs.writeFileSync(
+              actaPath,
+              actaBuf
             );
 
-            stream.on(
-              'error',
-              reject
+            await merger.add(
+              actaPath
             );
-          } catch (err) {
-            reject(err);
+
+            hadActaPdf = true;
+          } else {
+            console.warn(
+              `El acta para ${sesionId} no es un PDF válido o no se pudo descargar`
+            );
+          }
+        } finally {
+          if (
+            fs.existsSync(
+              actaPath
+            )
+          ) {
+            fs.unlinkSync(
+              actaPath
+            );
           }
         }
-      );
+      }
+
+      let actaImgsPath = null;
 
       if (
-        fs.existsSync(
-          actaImgsPath
-        )
+        actaImgsArray.length > 0
       ) {
-        await merger.add(
-          actaImgsPath
+        actaImgsPath =
+          path.join(
+            tempDir,
+            `acta-imgs-${sesionId}.pdf`
+          );
+
+        await new Promise(
+          async (
+            resolve,
+            reject
+          ) => {
+            try {
+              const doc =
+                new PDFDocument({
+                  autoFirstPage: false,
+                  margin: 40
+                });
+
+              const stream =
+                fs.createWriteStream(
+                  actaImgsPath
+                );
+
+              doc.pipe(stream);
+
+              for (
+                const it of actaImgsArray
+              ) {
+                const imgUrl =
+                  isCloudinaryUrl(
+                    it?.url
+                  )
+                    ? buildTransformedUrl(
+                        it.url
+                      )
+                    : it?.url;
+
+                const imgBuf =
+                  await safeGetBuffer(
+                    imgUrl
+                  );
+
+                if (!imgBuf) {
+                  continue;
+                }
+
+                doc.addPage();
+
+                const boxX =
+                  doc.page.margins.left;
+
+                const boxY =
+                  doc.page.margins.top;
+
+                const boxW =
+                  doc.page.width -
+                  doc.page.margins.left -
+                  doc.page.margins.right;
+
+                const boxH =
+                  doc.page.height -
+                  doc.page.margins.top -
+                  doc.page.margins.bottom;
+
+                centerImageInBox(
+                  doc,
+                  imgBuf,
+                  boxX,
+                  boxY,
+                  boxW,
+                  boxH
+                );
+              }
+
+              doc.end();
+
+              stream.on(
+                'finish',
+                resolve
+              );
+
+              stream.on(
+                'error',
+                reject
+              );
+            } catch (err) {
+              reject(err);
+            }
+          }
         );
 
-        hadActaImgs = true;
+        if (
+          fs.existsSync(
+            actaImgsPath
+          )
+        ) {
+          await merger.add(
+            actaImgsPath
+          );
+
+          hadActaImgs = true;
+        }
       }
-    }
 
-    await merger.add(
-      pdfImagenesPath
-    );
+      await merger.add(
+        pdfImagenesPath
+      );
 
-    await merger.save(
-      pdfFinalPath
-    );
+      await merger.save(
+        pdfFinalPath
+      );
 
-    let uploadMeta = null;
+      let uploadMeta = null;
 
-    try {
-      const finalBuffer =
-        fs.readFileSync(
-          pdfFinalPath
+      try {
+        const finalBuffer =
+          fs.readFileSync(
+            pdfFinalPath
+          );
+
+        uploadMeta =
+          await guardarInforme({
+            title:
+              `Informe técnico ${sesionId}`,
+            generatedBy:
+              req.auth.userId,
+            sesionId,
+            buffer:
+              finalBuffer,
+            includesActa:
+              hadActaPdf ||
+              hadActaImgs,
+            numeroIncidencia,
+            regional:
+              regionalBd,
+            tiendaId:
+              tiendaSeleccionada?._id ||
+              tiendaId ||
+              null,
+            tienda:
+              tiendaSeleccionada,
+            geolocalizacion
+          });
+      } catch (err) {
+        console.error(
+          `Error guardando informe ${sesionId}:`,
+          err
+        );
+      }
+
+      if (wantsJson) {
+        cleanupTemps();
+
+        const cloudUrlOriginal =
+          uploadMeta?.url ||
+          uploadMeta?.secure_url ||
+          uploadMeta?.cloudinary?.secure_url ||
+          uploadMeta?.informe?.url ||
+          null;
+
+        const cloudUrl = normalizarUrlPdfCloudinary(cloudUrlOriginal);
+
+        if (!cloudUrl) {
+          return res.status(500).json({
+            ok: false,
+            error:
+              'No se obtuvo URL del informe en Cloudinary'
+          });
+        }
+
+        const nombreArchivo = construirNombreArchivoDescarga(
+          numeroIncidencia,
+          tiendaSeleccionada?.nombre
         );
 
-      uploadMeta =
-        await guardarInforme({
-          title:
-            `Informe técnico ${sesionId}`,
-          generatedBy:
-            req.auth.userId,
-          sesionId,
-          buffer:
-            finalBuffer,
+        const informeId = uploadMeta?._id?.toString() || null;
+
+        const tokenVistaPrevia = informeId
+          ? crearTokenVistaPrevia(informeId, `${nombreArchivo}.pdf`)
+          : null;
+
+        const previewUrl = tokenVistaPrevia
+          ? construirUrlVistaPrevia(req, tokenVistaPrevia)
+          : null;
+
+        await cleanupSessionAssetsAsync({
+          imagenes,
+          actaPublicId,
+          actaImgsPublicIds
+        });
+
+        return res.status(201).json({
+          ok: true,
+          id: informeId,
+          url:
+            cloudUrl,
+          previewUrl,
+          filename: `${nombreArchivo}.pdf`,
+          publicId:
+            uploadMeta?.publicId ||
+            null,
           includesActa:
             hadActaPdf ||
             hadActaImgs,
-          numeroIncidencia,
-          regional:
-            regionalBd,
+          sesionId,
           tiendaId:
-            tiendaSeleccionada?._id ||
+            tiendaSeleccionada?._id?.toString() ||
             tiendaId ||
             null,
           tienda:
-            tiendaSeleccionada,
+            tiendaSeleccionada
+              ? {
+                  _id:
+                    tiendaSeleccionada._id?.toString(),
+                  nombre:
+                    tiendaSeleccionada.nombre,
+                  regional:
+                    tiendaSeleccionada.regional,
+                  departamento:
+                    tiendaSeleccionada.departamento,
+                  ciudad:
+                    tiendaSeleccionada.ciudad
+                }
+              : null,
+          ubicacion,
+          numeroIncidencia:
+            numeroIncidencia ||
+            '',
+          generatedBy:
+            req.auth.userId,
           geolocalizacion
         });
+      }
+
+      const nombreArchivo = construirNombreArchivoDescarga(
+        numeroIncidencia,
+        tiendaSeleccionada?.nombre
+      );
+
+      return res.download(
+        pdfFinalPath,
+        `${nombreArchivo}.pdf`,
+        (downloadError) => {
+          cleanupTemps();
+
+          if (!downloadError) {
+            cleanupSessionAssetsAsync({
+              imagenes,
+              actaPublicId,
+              actaImgsPublicIds
+            }).catch(
+              (cleanupError) => {
+                console.warn(
+                  'Error durante la limpieza posterior a la descarga:',
+                  cleanupError?.message ||
+                  cleanupError
+                );
+              }
+            );
+          }
+        }
+      );
     } catch (err) {
       console.error(
-        `Error guardando informe ${sesionId}:`,
+        'Error al generar PDF:',
         err
       );
-    }
 
-    if (wantsJson) {
       cleanupTemps();
 
-      const cloudUrl =
-        uploadMeta?.url ||
-        uploadMeta?.secure_url ||
-        uploadMeta?.cloudinary?.secure_url ||
-        uploadMeta?.informe?.url ||
-        null;
-
-      if (!cloudUrl) {
+      if (wantsJson) {
         return res.status(500).json({
           ok: false,
           error:
-            'No se obtuvo URL del informe en Cloudinary'
+            'Error al generar el PDF'
         });
       }
 
-      await cleanupSessionAssetsAsync({
-        imagenes,
-        actaPublicId,
-        actaImgsPublicIds
-      });
-
-      return res.status(201).json({
-        ok: true,
-        id:
-          uploadMeta?._id?.toString() ||
-          null,
-        url:
-          cloudUrl,
-        publicId:
-          uploadMeta?.publicId ||
-          null,
-        includesActa:
-          hadActaPdf ||
-          hadActaImgs,
-        sesionId,
-        tiendaId:
-          tiendaSeleccionada?._id?.toString() ||
-          tiendaId ||
-          null,
-        tienda:
-          tiendaSeleccionada
-            ? {
-                _id:
-                  tiendaSeleccionada._id?.toString(),
-                nombre:
-                  tiendaSeleccionada.nombre,
-                regional:
-                  tiendaSeleccionada.regional,
-                departamento:
-                  tiendaSeleccionada.departamento,
-                ciudad:
-                  tiendaSeleccionada.ciudad
-              }
-            : null,
-        ubicacion,
-        numeroIncidencia:
-          numeroIncidencia ||
-          '',
-        generatedBy:
-          req.auth.userId,
-        geolocalizacion
-      });
+      return res.status(500).send(
+        'Error al generar el PDF'
+      );
     }
-
-    const nombreArchivo = construirNombreArchivoDescarga(
-      numeroIncidencia,
-      tiendaSeleccionada?.nombre
-    );
-
-    return res.download(
-      pdfFinalPath,
-      `${nombreArchivo}.pdf`,
-      (downloadError) => {
-        cleanupTemps();
-
-        if (!downloadError) {
-          cleanupSessionAssetsAsync({
-            imagenes,
-            actaPublicId,
-            actaImgsPublicIds
-          }).catch(
-            (cleanupError) => {
-              console.warn(
-                'Error durante la limpieza posterior a la descarga:',
-                cleanupError?.message ||
-                cleanupError
-              );
-            }
-          );
-        }
-      }
-    );
-  } catch (err) {
-    console.error(
-      'Error al generar PDF:',
-      err
-    );
-
-    cleanupTemps();
-
-    if (wantsJson) {
-      return res.status(500).json({
-        ok: false,
-        error:
-          'Error al generar el PDF'
-      });
-    }
-
-    return res.status(500).send(
-      'Error al generar el PDF'
-    );
   }
-});
+);
+
+router.previewRouter = previewRouter;
 
 module.exports = router;
-

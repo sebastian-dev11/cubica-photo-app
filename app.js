@@ -28,6 +28,11 @@ app.use('/login', authRoutes);
 app.use('/crear', authRoutes);
 
 app.use('/imagenes', authRequired, imagenRoutes);
+
+if (pdfRoutes.previewRouter) {
+  app.use('/pdf-preview', pdfRoutes.previewRouter);
+}
+
 app.use('/pdf', authRequired, pdfRoutes);
 app.use('/acta', authRequired, actaRoutes);
 app.use('/informes', authRequired, informesRoutes);
