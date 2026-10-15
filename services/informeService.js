@@ -20,11 +20,27 @@ function construirNombreArchivoInforme(numeroIncidencia, tiendaNombre) {
   const incidencia = limpiarTexto(numeroIncidencia) || 'SIN INCIDENCIA';
   const tienda = limpiarTexto(tiendaNombre) || 'SIN TIENDA';
 
-  return `INFORME TÉCNICO - ${incidencia} - ${tienda}`
+  return `INFORME TÉCNICO-${incidencia}-${tienda}`
+    .toLocaleUpperCase('es-CO')
     .replace(/[\/:*?"<>|]/g, '-')
     .replace(/\s+/g, ' ')
     .replace(/[. ]+$/g, '')
     .trim();
+}
+
+function construirUrlDescargaInforme(url, nombreArchivo) {
+  if (typeof url !== 'string') return url;
+
+  const segmento = '/raw/upload/';
+
+  if (!url.includes(segmento)) return url;
+
+  const nombreCodificado = encodeURIComponent(`${nombreArchivo}.pdf`);
+
+  return url.replace(
+    segmento,
+    `${segmento}fl_attachment:${nombreCodificado}/`
+  );
 }
 
 function esPDF(buffer) {
@@ -192,7 +208,7 @@ function limpiarObjetoParaComparar(valor) {
 
     const obj = {};
 
-    Object.keys(valor).forEach((key) => {
+      Object.keys(valor).forEach((key) => {
       if (key === '_id') return;
       obj[key] = limpiarObjetoParaComparar(valor[key]);
     });
@@ -402,7 +418,7 @@ async function intentarRegenerarPdfInforme({
 
   const pdfNuevo = {
     url: resultado.url,
-    publicId: resultado.publicId,
+        publicId: resultado.publicId,
     mimeType: resultado.mimeType || 'application/pdf',
     includesActa: Boolean(resultado.includesActa)
   };
@@ -500,11 +516,16 @@ async function guardarInforme({
         }
 
         try {
+          const urlDescarga = construirUrlDescargaInforme(
+            result.secure_url,
+            nombreArchivo
+          );
+
           const informe = await Informe.create({
             title,
             generatedBy,
             sesionId: sesionIdNormalizado,
-            url: result.secure_url,
+            url: urlDescarga,
             publicId: result.public_id,
             mimeType: 'application/pdf',
             numeroIncidencia,
@@ -606,8 +627,7 @@ async function eliminarInforme({
 
   const informe = await Informe.findById(id);
 
-  if (!informe) {
-    const err = new Error('Informe no encontrado.');
+  if (!informe) {    const err = new Error('Informe no encontrado.');
     err.status = 404;
     throw err;
   }
@@ -817,7 +837,7 @@ async function editarInforme({
       await calcularSiguienteVersionActual(informe);
 
     const pdfRegenerado = await intentarRegenerarPdfInforme({
-      informe,
+            informe,
       valoresNuevos,
       cambios,
       nuevaVersionActual: nuevaVersionActualSugerida

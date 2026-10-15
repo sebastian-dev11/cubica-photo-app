@@ -15,6 +15,25 @@ const cloudinary = require('../utils/cloudinary');
 const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1773871245/LOGO_CUBICA_NUEVO_v3rsq5.jpg';
 const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1773875275/D1_LOGO_NUEVO_kj1bdh.jpg';
 
+function construirNombreArchivoDescarga(numeroIncidencia, tiendaNombre) {
+  const incidencia =
+    typeof numeroIncidencia === 'string'
+      ? numeroIncidencia.replace(/\s+/g, ' ').trim()
+      : '';
+
+  const tienda =
+    typeof tiendaNombre === 'string'
+      ? tiendaNombre.replace(/\s+/g, ' ').trim()
+      : '';
+
+  return `INFORME TÉCNICO-${incidencia || 'SIN INCIDENCIA'}-${tienda || 'SIN TIENDA'}`
+    .toLocaleUpperCase('es-CO')
+    .replace(/[\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .trim();
+}
+
 function isCloudinaryUrl(url) {
   return typeof url === 'string' && /res\.cloudinary\.com/.test(url);
 }
@@ -349,7 +368,7 @@ function computeImagePageLayout(
   const labelGap = 8;
   const labelH = 18;
   const obsGap = 6;
-  const obsReserve = 32;
+    const obsReserve = 32;
   const lineGap = 16;
   const bottomGap = 18;
 
@@ -1006,8 +1025,7 @@ router.get(
           'No se pudo eliminar el archivo'
       };
     };
-
-    const cleanupSessionAssetsAsync = async ({
+        const cleanupSessionAssetsAsync = async ({
       imagenes = [],
       actaPublicId = null,
       actaImgsPublicIds = []
@@ -1470,7 +1488,7 @@ router.get(
           }
         }
       );
-          const merger = new PDFMerger();
+                const merger = new PDFMerger();
 
     const store = actasEnMemoria[sesionId];
     const actaUrl =
@@ -1768,9 +1786,14 @@ router.get(
       });
     }
 
+    const nombreArchivo = construirNombreArchivoDescarga(
+      numeroIncidencia,
+      tiendaSeleccionada?.nombre
+    );
+
     return res.download(
       pdfFinalPath,
-      `informe_tecnico_${sesionId}.pdf`,
+      `${nombreArchivo}.pdf`,
       (downloadError) => {
         cleanupTemps();
 
