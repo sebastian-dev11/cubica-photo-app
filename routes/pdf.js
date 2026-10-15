@@ -128,11 +128,37 @@ previewRouter.get('/:token', async (req, res) => {
   try {
     const informe = await Informe.findById(payload.id).lean();
 
-    if (!informe || !informe.url) {
+    if (!informe) {
       return res.status(404).send('No se encontró el informe solicitado.');
     }
 
-    const urlPdf = normalizarUrlPdfCloudinary(informe.url);
+    let urlPdf = '';
+    const publicId = informe.publicId || informe.public_id || '';
+
+    if (publicId) {
+      try {
+        const recurso = await cloudinary.api.resource(publicId, {
+          resource_type: 'raw'
+        });
+        urlPdf = normalizarUrlPdfCloudinary(
+          recurso?.secure_url || recurso?.url || ''
+        );
+      } catch (cloudinaryError) {
+        console.warn(
+          'No se pudo localizar el PDF por publicId en Cloudinary:',
+          cloudinaryError?.message || cloudinaryError
+        );
+      }
+    }
+
+    if (!urlPdf) {
+      urlPdf = normalizarUrlPdfCloudinary(informe.url);
+    }
+
+    if (!urlPdf) {
+      return res.status(404).send('El informe no tiene un PDF disponible en Cloudinary.');
+    }
+
     const respuesta = await axios.get(urlPdf, {
       responseType: 'arraybuffer',
       timeout: 30000,
@@ -172,8 +198,7 @@ function insertTransformInCloudinaryUrl(url, transformStr) {
     const idx = url.indexOf(uploadSegment);
 
     if (idx === -1) return url;
-
-    const afterUpload = url.slice(idx + uploadSegment.length);
+        const afterUpload = url.slice(idx + uploadSegment.length);
     const alreadyHasTransforms = !afterUpload.startsWith('v');
 
     if (alreadyHasTransforms) return url;
@@ -372,7 +397,7 @@ function normalizarGeolocalizacionDesdeQuery(query = {}) {
 }
 
 function tieneGeolocalizacion(geolocalizacion) {
-  return (
+   return (
     geolocalizacion &&
     geolocalizacion.latitud !== null &&
     geolocalizacion.longitud !== null
@@ -572,7 +597,7 @@ async function renderEvidencePairs(
       pares.slice(
         index,
         index + pairsPerPage
-      );
+              );
 
     if (!isFirstPage) {
       doc.addPage();
@@ -772,7 +797,7 @@ router.post(
       if (
         !sesionId ||
         typeof sesionId !== 'string'
-      ) {
+              ) {
         return res.status(400).json({
           ok: false,
           error: 'sesionId inválido'
@@ -910,6 +935,106 @@ router.post(
     }
   }
 );
+
+router.get('/preview-link/:informeId', async (req, res) => {
+  const informeId = String(req.params.informeId || '');
+
+  if (!/^[a-f\d]{24}$/i.test(informeId)) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Id de informe inválido'
+    });
+  }
+
+  try {
+    const informe = await Informe.findById(informeId)
+      .populate('generatedBy', 'usuario nombre')
+      .populate('tiendaId', 'nombre regional departamento ciudad')
+      .lean();
+
+    if (!informe) {
+      return res.status(404).json({
+        ok: false,
+        error: 'No se encontró el informe solicitado'
+      });
+    }
+
+    const propietarioId = String(
+      informe.generatedBy?._id || informe.generatedBy || ''
+    );
+    const usuarioId = String(req.auth?.userId || '');
+
+    if (!req.auth?.isAdmin && (!usuarioId || propietarioId !== usuarioId)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'No estás autorizado para visualizar este informe'
+      });
+    }
+
+    const publicId = informe.publicId || informe.public_id || '';
+    let urlPdf = '';
+
+    if (publicId) {
+      try {
+        const recurso = await cloudinary.api.resource(publicId, {
+          resource_type: 'raw'
+        });
+        urlPdf = normalizarUrlPdfCloudinary(
+          recurso?.secure_url || recurso?.url || ''
+        );
+      } catch (cloudinaryError) {
+        console.warn(
+          'No se pudo localizar el PDF por publicId en Cloudinary:',
+          cloudinaryError?.message || cloudinaryError
+        );
+      }
+    }
+
+    if (!urlPdf) {
+      urlPdf = normalizarUrlPdfCloudinary(informe.url);
+    }
+
+    if (!urlPdf) {
+      return res.status(404).json({
+        ok: false,
+                error: 'El informe no tiene una URL ni un recurso PDF disponible en Cloudinary'
+      });
+    }
+
+    const tiendaNombre =
+      informe.tiendaNombre ||
+      informe.tiendaId?.nombre ||
+      '';
+
+    const nombreArchivo = construirNombreArchivoDescarga(
+      String(informe.numeroIncidencia || ''),
+      String(tiendaNombre)
+    );
+
+    const tokenVistaPrevia = crearTokenVistaPrevia(
+      informe._id.toString(),
+      `${nombreArchivo}.pdf`
+    );
+
+    res.set('Cache-Control', 'no-store');
+
+    return res.json({
+      ok: true,
+      previewUrl: construirUrlVistaPrevia(req, tokenVistaPrevia),
+      filename: `${nombreArchivo}.pdf`
+    });
+  } catch (error) {
+    console.error(
+      'Error creando enlace de vista previa:',
+      error?.message || error
+    );
+
+    return res.status(500).json({
+      ok: false,
+      error: 'No se pudo crear el enlace de vista previa'
+    });
+  }
+});
 
 router.get(
   '/generar/:sesionId',
@@ -1072,7 +1197,7 @@ router.get(
         }
       } catch (e) {
         console.warn(
-          'No se pudo limpiar temporales:',
+                    'No se pudo limpiar temporales:',
           e?.message || e
         );
       }
@@ -1272,7 +1397,7 @@ router.get(
               (item) =>
                 !item.ok &&
                 item.imageId
-            )
+                            )
             .map(
               (item) =>
                 item.imageId
@@ -1472,7 +1597,7 @@ router.get(
               .fillColor('black')
               .fontSize(24)
               .text(
-                'Informe técnico',
+                                'Informe técnico',
                 50,
                 100,
                 {
@@ -1672,8 +1797,7 @@ router.get(
             await merger.add(
               actaPath
             );
-
-            hadActaPdf = true;
+                        hadActaPdf = true;
           } else {
             console.warn(
               `El acta para ${sesionId} no es un PDF válido o no se pudo descargar`
@@ -1871,8 +1995,7 @@ router.get(
           numeroIncidencia,
           tiendaSeleccionada?.nombre
         );
-
-        const informeId = uploadMeta?._id?.toString() || null;
+                const informeId = uploadMeta?._id?.toString() || null;
 
         const tokenVistaPrevia = informeId
           ? crearTokenVistaPrevia(informeId, `${nombreArchivo}.pdf`)
