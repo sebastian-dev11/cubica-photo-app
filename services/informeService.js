@@ -28,21 +28,6 @@ function construirNombreArchivoInforme(numeroIncidencia, tiendaNombre) {
     .trim();
 }
 
-function construirUrlDescargaInforme(url, nombreArchivo) {
-  if (typeof url !== 'string') return url;
-
-  const segmento = '/raw/upload/';
-
-  if (!url.includes(segmento)) return url;
-
-  const nombreCodificado = encodeURIComponent(`${nombreArchivo}.pdf`);
-
-  return url.replace(
-    segmento,
-    `${segmento}fl_attachment:${nombreCodificado}/`
-  );
-}
-
 function esPDF(buffer) {
   return buffer.slice(0, 4).toString() === '%PDF';
 }
@@ -208,7 +193,7 @@ function limpiarObjetoParaComparar(valor) {
 
     const obj = {};
 
-      Object.keys(valor).forEach((key) => {
+    Object.keys(valor).forEach((key) => {
       if (key === '_id') return;
       obj[key] = limpiarObjetoParaComparar(valor[key]);
     });
@@ -218,7 +203,6 @@ function limpiarObjetoParaComparar(valor) {
 
   return valor;
 }
-
 function sonIguales(anterior, nuevo) {
   return JSON.stringify(limpiarObjetoParaComparar(anterior)) ===
     JSON.stringify(limpiarObjetoParaComparar(nuevo));
@@ -418,7 +402,7 @@ async function intentarRegenerarPdfInforme({
 
   const pdfNuevo = {
     url: resultado.url,
-        publicId: resultado.publicId,
+    publicId: resultado.publicId,
     mimeType: resultado.mimeType || 'application/pdf',
     includesActa: Boolean(resultado.includesActa)
   };
@@ -440,7 +424,6 @@ async function intentarRegenerarPdfInforme({
     fuentes: resultado.fuentes || null
   };
 }
-
 async function guardarInforme({
   title,
   generatedBy = null,
@@ -516,16 +499,11 @@ async function guardarInforme({
         }
 
         try {
-          const urlDescarga = construirUrlDescargaInforme(
-            result.secure_url,
-            nombreArchivo
-          );
-
           const informe = await Informe.create({
             title,
             generatedBy,
             sesionId: sesionIdNormalizado,
-            url: urlDescarga,
+            url: result.secure_url,
             publicId: result.public_id,
             mimeType: 'application/pdf',
             numeroIncidencia,
@@ -612,7 +590,6 @@ function verificarAutorizacionEliminacion({
     throw err;
   }
 }
-
 async function eliminarInforme({
   id,
   requesterUserId = null,
@@ -627,7 +604,8 @@ async function eliminarInforme({
 
   const informe = await Informe.findById(id);
 
-  if (!informe) {    const err = new Error('Informe no encontrado.');
+  if (!informe) {
+    const err = new Error('Informe no encontrado.');
     err.status = 404;
     throw err;
   }
@@ -831,13 +809,12 @@ async function editarInforme({
       valoresNuevos.geolocalizacion
     );
   }
-
-  if (cambios.length > 0) {
+    if (cambios.length > 0) {
     const nuevaVersionActualSugerida =
       await calcularSiguienteVersionActual(informe);
 
     const pdfRegenerado = await intentarRegenerarPdfInforme({
-            informe,
+      informe,
       valoresNuevos,
       cambios,
       nuevaVersionActual: nuevaVersionActualSugerida
