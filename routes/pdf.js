@@ -15,8 +15,8 @@ const Tienda = require('../models/tienda');
 const { guardarInforme } = require('../services/informeService');
 const cloudinary = require('../utils/cloudinary');
 
-const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1773871245/LOGO_CUBICA_NUEVO_v3rsq5.jpg';
-const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1773875275/D1_LOGO_NUEVO_kj1bdh.jpg';
+const LOGO_CUBICA_URL = 'https://res.cloudinary.com/hg7dbayv/image/upload/v1792420606/LOGO_CUBICA.png';
+const LOGO_D1_URL = 'https://res.cloudinary.com/hg7dbayv/image/upload/v1792420804/D1_LOGO_NUEVO.jpg';
 
 function construirNombreArchivoDescarga(numeroIncidencia, tiendaNombre) {
   const incidencia =
