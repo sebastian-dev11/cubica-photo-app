@@ -213,7 +213,7 @@ function insertTransformInCloudinaryUrl(url, transformStr) {
 }
 
 function buildTransformedUrl(url) {
-  return insertTransformInCloudinaryUrl(url, 'f_jpg,q_75,w_1800');
+  return insertTransformInCloudinaryUrl(url, 'f_jpg,q_65,w_1400');
 }
 
 function buildLogoUrl(url) {
