@@ -50,8 +50,7 @@ function crearTokenVistaPrevia(informeId, nombreArchivo) {
 
   const payload = Buffer.from(JSON.stringify({
     id: String(informeId),
-    filename: nombreArchivo,
-    exp: Date.now() + 24 * 60 * 60 * 1000
+    filename: nombreArchivo
   })).toString('base64url');
 
   const signature = crypto
@@ -90,9 +89,7 @@ function verificarTokenVistaPrevia(token) {
     if (
       typeof payload.id !== 'string' ||
       typeof payload.filename !== 'string' ||
-      !payload.filename.toLowerCase().endsWith('.pdf') ||
-      !Number.isFinite(payload.exp) ||
-      payload.exp <= Date.now()
+      !payload.filename.toLowerCase().endsWith('.pdf')
     ) {
       return null;
     }
@@ -488,7 +485,6 @@ function renderGeolocalizacion(doc, geolocalizacion) {
 
   doc.fillColor('black');
 }
-
 function computeImagePageLayout(
   doc,
   pairsOnPage,
@@ -935,7 +931,6 @@ router.post(
     }
   }
 );
-
 router.get('/preview-link/:informeId', async (req, res) => {
   const informeId = String(req.params.informeId || '');
 
@@ -1352,7 +1347,7 @@ router.get(
               `No se pudo eliminar el acta ${actaPublicId} de Cloudinary:`,
               result.error ||
               result.reason
-            );
+                          );
           }
         }
 
@@ -1801,7 +1796,7 @@ router.get(
           } else {
             console.warn(
               `El acta para ${sesionId} no es un PDF válido o no se pudo descargar`
-            );
+                          );
           }
         } finally {
           if (
