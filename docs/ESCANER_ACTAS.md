@@ -1,26 +1,25 @@
-# Escáner de actas (estilo CamScanner)
+# Escáner de actas
 
-Este módulo permite convertir fotos de actas en páginas escaneadas: detecta el documento, corrige la perspectiva, aplica filtros de mejora, ordena varias páginas y genera un PDF listo para descargar o para fusionarse con el informe técnico.
+**Comportamiento actual:** las páginas del acta se guardan **tal cual se cargan**, sin recorte, sin corrección de perspectiva, sin filtros y sin recodificación. Esto evita que las imágenes queden cortadas o incompletas. El escaneo avanzado sigue disponible solo como herramienta opcional y explícita en `POST /acta/procesar`; no se aplica a lo que se almacena ni a lo que se fusiona en el informe.
 
 Todo vive bajo `/acta` y requiere el token JWT habitual (`Authorization: Bearer <token>`). El `sesionId` debe pertenecer al usuario autenticado, salvo que sea administrador.
 
 ## Flujo recomendado desde el frontend
 
 1. El usuario toma o selecciona una foto del acta.
-2. `POST /acta/detectar` devuelve las 4 esquinas del documento.
-3. Se muestran las esquinas para que el usuario las ajuste (opcional).
-4. `POST /acta/procesar` devuelve una vista previa con el filtro seleccionado.
-5. `POST /acta/subir` guarda las páginas escaneadas o `POST /acta/:sesionId/pagina` agrega una página por request.
-6. `GET /acta/:sesionId/pdf` genera el PDF del acta.
+2. `POST /acta/subir` guarda las fotos originales (o `POST /acta/:sesionId/pagina` agrega una página por request).
+3. `GET /acta/:sesionId/pdf` genera el PDF del acta con las imágenes completas.
+
+Opcionalmente, `POST /acta/detectar` y `POST /acta/procesar` permiten inspeccionar el documento o probar un filtro, pero su resultado **no se guarda** automáticamente.
 
 ## Endpoints
 
 | Método | Ruta | Descripción |
 | --- | --- | --- |
 | `POST` | `/acta/detectar` | Detecta el documento y devuelve sus 4 esquinas. |
-| `POST` | `/acta/procesar` | Procesa una imagen y devuelve la vista previa (binario o JSON). |
-| `POST` | `/acta/subir` | Sube y escanea una o varias páginas, y opcionalmente un PDF de acta. |
-| `POST` | `/acta/:sesionId/pagina` | Agrega una sola página escaneada a un acta existente. |
+| `POST` | `/acta/procesar` | Devuelve la imagen completa por defecto; procesa solo si se piden opciones explícitamente. |
+| `POST` | `/acta/subir` | Sube una o varias páginas originales, y opcionalmente un PDF de acta. |
+| `POST` | `/acta/:sesionId/pagina` | Agrega una sola página original a un acta existente. |
 | `GET` | `/acta/:sesionId` | Consulta las páginas y el PDF del acta. |
 | `GET` | `/acta/:sesionId/pdf` | Genera y devuelve el PDF con todas las páginas escaneadas. |
 | `PATCH` | `/acta/:sesionId/orden` | Cambia el orden de las páginas. |
@@ -86,16 +85,16 @@ Content-Type: multipart/form-data
 | --- | --- | --- | --- |
 | `imagen` | File | Sí | Foto del acta. |
 | `sesionId` | String | No | Sesión autenticada. |
-| `scanMode` | String | No | `clean` por defecto. Ver modos. |
-| `crop` | String | No | `auto` por defecto; `none` desactiva el recorte. |
-| `quad` | JSON | No | Cuatro puntos ajustados manualmente. |
+| `scanMode` | String | No | Si se envía, aplica el filtro a la vista previa. Sin valor se devuelve la imagen original. Ver modos. |
+| `crop` | String | No | `auto` recorta; por defecto **no se recorta**. |
+| `quad` | JSON | No | Cuatro puntos ajustados manualmente (implica recorte). |
 | `quadUnidades` | String | No | `normalizado` o `pixel`. Se autodetecta si se omite. |
 
 Sin `?formato=json` responde directamente un JPEG y agrega estos headers:
 
-- `X-Acta-Escaneada`: `1` o `0`.
-- `X-Acta-Modo`: modo aplicado.
-- `X-Acta-Metodo`: `perspectiva`, `manual`, `rectangulo`, `recorte` o `completo`.
+- `X-Acta-Escaneada`: `0` por defecto; `1` solo si se pidieron opciones de escaneo.
+- `X-Acta-Modo`: modo aplicado (`original` cuando no se procesa).
+- `X-Acta-Metodo`: `completo` por defecto; `perspectiva`, `manual`, `rectangulo` o `recorte` si se recortó explícitamente.
 - `X-Acta-Width` y `X-Acta-Height`: dimensiones de salida.
 
 Con `?formato=json` responde:
@@ -116,7 +115,7 @@ Con `?formato=json` responde:
 
 La variante JSON es útil si el frontend corre en otro dominio y no puede leer headers personalizados con facilidad.
 
-## 3. Subir y escanear páginas
+## 3. Subir páginas (sin procesamiento)
 
 ```http
 POST /acta/subir
@@ -128,17 +127,11 @@ Content-Type: multipart/form-data
 | `sesionId` | String | Sí | Sesión del acta. |
 | `imagenes` | File[] | Sí* | Hasta 20 páginas. |
 | `acta` | File | No | PDF de acta ya existente. |
-| `scanMode` | String | No | Aplica a todas las páginas. Default `clean`. |
-| `scanModes` | JSON[] | No | Modo por página, por ejemplo `["clean","bn"]`. |
-| `crop` | String | No | `auto` (default) o `none`. |
-| `crops` | JSON[] | No | Recorte por página, por ejemplo `[true,false]`. |
-| `quad` | JSON | No | Esquinas para una sola página. |
-| `quads` | JSON[] | No | Esquinas por página: `[[[x,y]...],[[x,y]...]]`. |
-| `quadUnidades` | String | No | `normalizado` (recomendado) o `pixel`. |
+| `scanMode`, `scanModes`, `crop`, `crops`, `quad`, `quads`, `quadUnidades` | — | No | **Se ignoran.** Esta ruta siempre guarda la imagen original. |
 
 \* Se requiere al menos `imagenes` o `acta`.
 
-Las esquinas se pueden enviar como `[[x, y], ...]` o `[{ "x": 0.2, "y": 0.1 }, ...]`. Si todos los valores están entre 0 y 1 se interpretan como normalizados.
+Las páginas se almacenan sin recortar y en su formato original. Para obtener una vista previa con filtros usa `/acta/procesar`, pero ese resultado no reemplaza a la página guardada.
 
 Respuesta:
 
@@ -155,10 +148,10 @@ Respuesta:
       "public_id": "actas/.../imagenes/abc",
       "width": 891,
       "height": 1261,
-      "escaneada": true,
-      "scanMode": "clean",
-      "quad": [{ "x": 0.21, "y": 0.13 }],
-      "crop": { "tipo": "perspectiva", "quad": [{ "x": 0.21, "y": 0.13 }] },
+      "escaneada": false,
+      "scanMode": "original",
+      "quad": null,
+      "crop": null,
       "orden": 0
     }
   ],
@@ -196,9 +189,9 @@ Devuelve un PDF A4 (horizontal o vertical según cada página). Con `?descargar=
 
 | Modo | Resultado |
 | --- | --- |
-| `original` | Solo recorte y perspectiva, sin filtros de color. |
+| `original` | Sin filtros. Es el estado por defecto de las páginas guardadas. |
 | `soft` | Mejora suave, mantiene el color natural y reduce saturación. |
-| `clean` | **Default.** Bloquea el fondo hacia blanco y resalta el texto (equivalente al modo "mágico" de CamScanner). |
+| `clean` | Bloquea el fondo hacia blanco y resalta el texto. Solo se aplica si se pide explícitamente en `/acta/procesar`. |
 | `bn` | Escala de grises con alto contraste, ideal para actas con texto. |
 
 Alias aceptados: `bw`, `b/n`, `blanco`, `gray`, `gris` → `bn`; `magic`, `color`, `documento`, `auto` → `clean`.
@@ -215,36 +208,20 @@ Alias aceptados: `bw`, `b/n`, `blanco`, `gray`, `gris` → `bn`; `magic`, `color
 
 - Tamaño máximo por archivo: 25 MB.
 - Máximo 25 archivos por request; 20 páginas de imagen por `/acta/subir`.
-- Salida máxima por página: 1800 × 2400 px (se respeta la proporción y se limita a ~4.5 MP).
-- Calidad JPEG 90 con `mozjpeg`.
-- Tiempos de referencia en un equipo de desarrollo: detección ~0.06–0.2 s; escaneo completo ~0.2–0.5 s por página.
+- Las páginas subidas conservan su resolución y formato originales; no se limitan a 1800 × 2400 px ni se recodifican a JPEG.
+- Los límites de 1800 × 2400 px y JPEG 90 con `mozjpeg` aplican únicamente a `/acta/procesar` cuando se pide un escaneo explícito.
+- Tiempos de referencia en un equipo de desarrollo: detección ~0.06–0.2 s; escaneo opcional ~0.2–0.5 s por página.
 
 ## Ejemplo mínimo en el frontend
 
 ```js
-async function escanearActa({ token, sesionId, fotos }) {
+async function subirActa({ token, sesionId, fotos }) {
   const form = new FormData();
   form.append('sesionId', sesionId);
-  form.append('scanMode', 'clean');
-
-  const quads = [];
 
   for (const foto of fotos) {
-    const deteccion = new FormData();
-    deteccion.append('sesionId', sesionId);
-    deteccion.append('imagen', foto, foto.name);
-
-    const respuestaDeteccion = await fetch('/acta/detectar', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: deteccion
-    }).then((r) => r.json());
-
-    quads.push(respuestaDeteccion.detectado ? respuestaDeteccion.quadNormalizado : null);
     form.append('imagenes', foto, foto.name);
   }
-
-  form.append('quads', JSON.stringify(quads));
 
   const respuesta = await fetch('/acta/subir', {
     method: 'POST',

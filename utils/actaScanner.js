@@ -33,6 +33,18 @@ const DEFAULT_OPTIONS = {
   detectarPerspectiva: true
 };
 
+const EXTENSIONES_POR_MIME = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/bmp': 'bmp',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'image/tiff': 'tiff'
+};
+
 const MODOS_VALIDOS = ['original', 'soft', 'clean', 'bn'];
 const MODOS_ALIAS = {
   'bw': 'bn',
@@ -47,6 +59,18 @@ const MODOS_ALIAS = {
   documento: 'clean',
   auto: 'clean'
 };
+
+function resolverFormatoOriginal(mimetype) {
+  const mime = String(mimetype || '')
+    .split(';')[0]
+    .toLowerCase()
+    .trim();
+
+  return {
+    mimetype: mime || 'image/jpeg',
+    extension: EXTENSIONES_POR_MIME[mime] || 'jpg'
+  };
+}
 
 function crearBase(buffer) {
   return sharp(buffer, {
@@ -1057,6 +1081,37 @@ function normalizarQuadSalida(quad, width, height) {
 async function procesarImagenActa(buffer, opts = {}) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     throw new Error('El buffer de la imagen del acta es obligatorio.');
+  }
+
+  // Modo de subida normal: se devuelve el buffer original sin recortar,
+  // sin corregir perspectiva, sin filtros y sin recodificar. Solo se leen
+  // las dimensiones (respetando EXIF) para la metadata del registro.
+  if (opts.sinProcesamiento === true) {
+    const formato = resolverFormatoOriginal(opts.mimetype);
+    let dimensiones = { width: null, height: null };
+
+    try {
+      dimensiones = dimensionesOrientadas(
+        await crearBase(buffer).clone().metadata()
+      );
+    } catch {
+      // Se sube igual; Cloudinary resolverá las dimensiones reales.
+    }
+
+    return {
+      buffer,
+      mimetype: formato.mimetype,
+      extension: formato.extension,
+      procesada: false,
+      width: dimensiones.width || null,
+      height: dimensiones.height || null,
+      originalWidth: dimensiones.width || null,
+      originalHeight: dimensiones.height || null,
+      crop: null,
+      quad: null,
+      metodo: 'completo',
+      scanMode: 'original'
+    };
   }
 
   const options = {

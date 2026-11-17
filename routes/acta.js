@@ -327,6 +327,28 @@ function extraerQuad(req, indice) {
   return req.body?.quad;
 }
 
+function solicitaEscaneo(req) {
+  const cuerpo = req.body || {};
+
+  return [
+    'scanMode',
+    'scanModes',
+    'modo',
+    'crop',
+    'crops',
+    'quad',
+    'quads',
+    'maxWidth',
+    'maxHeight',
+    'quality'
+  ].some(
+    (clave) =>
+      cuerpo[clave] !== undefined &&
+      cuerpo[clave] !== null &&
+      cuerpo[clave] !== ''
+  );
+}
+
 function opcionesEscaneo(req, indice = 0) {
   const scanModeRaw =
     valorDeLista(req.body?.scanModes, indice) ??
@@ -339,7 +361,8 @@ function opcionesEscaneo(req, indice = 0) {
 
   return {
     scanMode: normalizarScanMode(scanModeRaw, 'clean'),
-    crop: resolverCrop(cropRaw),
+    // Sin indicación explícita no se recorta: las páginas deben quedar completas.
+    crop: cropRaw === undefined || cropRaw === null || cropRaw === '' ? false : resolverCrop(cropRaw),
     quad: extraerQuad(req, indice) || undefined,
     quadUnidades: req.body?.quadUnidades || undefined,
     maxWidth: req.body?.maxWidth,
@@ -348,16 +371,18 @@ function opcionesEscaneo(req, indice = 0) {
   };
 }
 
-async function subirImagenProcesada(file, opciones, sesionId) {
+async function subirImagenActa(file, sesionId) {
+  // La subida es normal: se guarda la imagen tal cual llegó. El escaneo
+  // (recorte/perspectiva/filtros) queda disponible solo de forma explícita
+  // en /acta/procesar y no se aplica a las páginas almacenadas.
   const resultado = await procesarImagenActaSeguro(file.buffer, {
-    ...opciones,
+    sinProcesamiento: true,
     mimetype: file.mimetype
   });
 
   const subida = await uploadBufferToCloudinary(resultado.buffer, {
     folder: `actas/${sesionId}/imagenes`,
-    resource_type: 'image',
-    format: 'jpg'
+    resource_type: 'image'
   });
 
   return {
@@ -366,10 +391,10 @@ async function subirImagenProcesada(file, opciones, sesionId) {
     nombre: textoBusqueda(file.originalname, 200),
     width: resultado.width || subida.width || null,
     height: resultado.height || subida.height || null,
-    escaneada: Boolean(resultado.procesada),
-    scanMode: resultado.scanMode,
-    crop: resultado.crop,
-    quad: resultado.quad,
+    escaneada: false,
+    scanMode: 'original',
+    crop: null,
+    quad: null,
     orden: 0,
     creadaEn: new Date(),
     errorProcesamiento: resultado.error || null
@@ -480,6 +505,7 @@ router.post('/procesar', uploadImagen, async (req, res) => {
     const opciones = opcionesEscaneo(req);
     const resultado = await procesarImagenActaSeguro(file.buffer, {
       ...opciones,
+      sinProcesamiento: !solicitaEscaneo(req),
       mimetype: file.mimetype
     });
 
@@ -594,7 +620,7 @@ router.post('/subir', uploadActa, async (req, res) => {
 
     for (let indice = 0; indice < imageFiles.length; indice += 1) {
       const file = imageFiles[indice];
-      const imagen = await subirImagenProcesada(file, opcionesEscaneo(req, indice), sesionId);
+      const imagen = await subirImagenActa(file, sesionId);
 
       store.imagenes.push(imagen);
       nuevasImagenes.push(imagen);
@@ -644,7 +670,7 @@ router.post('/:sesionId/pagina', uploadPagina, async (req, res) => {
     }
 
     const store = await obtenerStore(sesionId, req.auth?.userId);
-    const imagen = await subirImagenProcesada(file, opcionesEscaneo(req, 0), sesionId);
+    const imagen = await subirImagenActa(file, sesionId);
 
     store.imagenes.push(imagen);
     reordenarImagenes(store);

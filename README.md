@@ -163,31 +163,28 @@ Proceso
 - Limpieza de imágenes y registros.
 
 POST /acta/subir
-Sube una o varias fotos de acta, las escanea (detección del documento, corrección de perspectiva y filtros) y opcionalmente un PDF de acta. La referencia completa está en [docs/ESCANER_ACTAS.md](docs/ESCANER_ACTAS.md).
+Sube una o varias fotos de acta **tal cual se cargan** (sin recorte ni filtros) y opcionalmente un PDF de acta. La referencia completa está en [docs/ESCANER_ACTAS.md](docs/ESCANER_ACTAS.md).
 Campos (form-data)
 | Campo | Tipo | Requerido | Descripción | 
 | acta | File | ❌ | PDF de acta existente. |
 | imagenes | File[] | ❌* | Hasta 20 fotos del acta. |
 | sesionId | String | ✅ | ID de la sesión. |
-| scanMode | String | ❌ | `original`, `soft`, `clean` (default) o `bn`. |
-| crop | String | ❌ | `auto` (default) o `none`. |
-| quad / quads | JSON | ❌ | Esquinas manuales de una o varias páginas. |
+
+Los campos `scanMode`, `crop` y `quad`/`quads` se ignoran en esta ruta: las imágenes se guardan completas y en su formato original.
 
 
 \* Se requiere al menos `acta` o `imagenes`.
 
 
 Proceso
-- Detección de bordes y corrección de perspectiva con `sharp`.
-- Filtros de mejora de color o blanco y negro.
-- Subida de las páginas procesadas a Cloudinary.
+- Subida de las imágenes originales a Cloudinary (sin recodificar).
 - Persistencia en MongoDB (`actasdocumentos`) con copia en memoria.
 - Eliminación tras la fusión en el PDF final del informe.
 
 También disponibles:
-- `POST /acta/detectar`: devuelve las 4 esquinas del documento.
-- `POST /acta/procesar`: vista previa con el filtro aplicado.
-- `POST /acta/:sesionId/pagina`: agrega una página escaneada.
+- `POST /acta/detectar`: devuelve las 4 esquinas del documento (informativo).
+- `POST /acta/procesar`: vista previa opcional; por defecto devuelve la imagen completa y solo aplica filtros/recorte si se piden explícitamente. Su resultado no se guarda.
+- `POST /acta/:sesionId/pagina`: agrega una página original.
 - `GET /acta/:sesionId`: consulta las páginas del acta.
 - `GET /acta/:sesionId/pdf`: genera el PDF multipágina del acta.
 - `PATCH /acta/:sesionId/orden`: reordena las páginas.
