@@ -13,6 +13,8 @@ const confirmacionValida = argumentos.includes('--confirmar=ELIMINAR');
 const permitirSinInformes = argumentos.includes('--permitir-sin-informes');
 
 const idsImagenesProtegidas = new Set([
+  'LOGO_CUBICA',
+  'D1_LOGO_NUEVO',
   'LOGO_CUBICA_NUEVO_v3rsq5',
   'D1_LOGO_NUEVO_kj1bdh',
   'LOGO_CUBICA_TRANSPARENTE_gfjdep',

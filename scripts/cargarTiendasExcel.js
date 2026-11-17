@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const fs = require('fs');
 const path = require('path');
-const xlsx = require('xlsx');
+const csv = require('csv-parser');
 const mongoose = require('../db');
 const Tienda = require('../models/tienda');
 
@@ -13,17 +13,23 @@ function limpiarTexto(valor) {
 }
 
 function normalizarClave(valor) {
-  return limpiarTexto(valor).toUpperCase();
+  return limpiarTexto(valor)
+    .replace(/^\uFEFF/, '')
+    .toUpperCase();
 }
 
 function obtenerRutaArchivo() {
   const archivo = process.argv[2];
 
   if (!archivo) {
-    throw new Error('Debes indicar la ruta del archivo Excel');
+    throw new Error('Debes indicar la ruta del archivo CSV');
   }
 
   const ruta = path.resolve(process.cwd(), archivo);
+
+  if (path.extname(ruta).toLowerCase() !== '.csv') {
+    throw new Error('Este script solo acepta archivos CSV');
+  }
 
   if (!fs.existsSync(ruta)) {
     throw new Error(`No se encontró el archivo: ${ruta}`);
@@ -32,51 +38,46 @@ function obtenerRutaArchivo() {
   return ruta;
 }
 
-function validarColumnas(hoja) {
-  const primeraFila = hoja[0] || [];
+function detectarSeparador(ruta) {
+  const primeraLinea = fs.readFileSync(ruta, 'utf8').split(/\r?\n/)[0] || '';
+  return primeraLinea.includes(';') ? ';' : ',';
+}
 
-  const columnas = primeraFila.map((columna) =>
-    normalizarClave(columna)
-  );
+function leerCsv(ruta) {
+  return new Promise((resolve, reject) => {
+    const filas = [];
 
-  const requeridas = [
-    'NOMBRE',
-    'REGIONAL',
-    'DEPARTAMENTO',
-    'CIUDAD'
-  ];
+    fs.createReadStream(ruta)
+      .pipe(csv({
+        separator: detectarSeparador(ruta),
+        mapHeaders: ({ header }) => normalizarClave(header)
+      }))
+      .on('data', (fila) => filas.push(fila))
+      .on('end', () => resolve(filas))
+      .on('error', reject);
+  });
+}
 
-  const faltantes = requeridas.filter(
-    (columna) => !columnas.includes(columna)
-  );
+function validarColumnas(filas) {
+  const columnas = Object.keys(filas[0] || {});
+  const requeridas = ['NOMBRE', 'REGIONAL', 'DEPARTAMENTO', 'CIUDAD'];
+  const faltantes = requeridas.filter((columna) => !columnas.includes(columna));
 
   if (faltantes.length > 0) {
     throw new Error(
-      `Faltan las siguientes columnas en el Excel: ${faltantes.join(', ')}`
+      `Faltan las siguientes columnas en el CSV: ${faltantes.join(', ')}`
     );
   }
 }
 
-function prepararRegistros(hoja) {
-  const encabezados = hoja[0].map((columna) =>
-    normalizarClave(columna)
-  );
-
-  return hoja.slice(1).map((fila, indice) => {
-    const registro = {};
-
-    encabezados.forEach((encabezado, posicion) => {
-      registro[encabezado] = fila[posicion];
-    });
-
-    return {
-      fila: indice + 2,
-      nombre: limpiarTexto(registro.NOMBRE),
-      regional: limpiarTexto(registro.REGIONAL).toUpperCase(),
-      departamento: limpiarTexto(registro.DEPARTAMENTO),
-      ciudad: limpiarTexto(registro.CIUDAD)
-    };
-  });
+function prepararRegistros(filas) {
+  return filas.map((fila, indice) => ({
+    fila: indice + 2,
+    nombre: limpiarTexto(fila.NOMBRE),
+    regional: limpiarTexto(fila.REGIONAL).toUpperCase(),
+    departamento: limpiarTexto(fila.DEPARTAMENTO),
+    ciudad: limpiarTexto(fila.CIUDAD)
+  }));
 }
 
 function crearClave({ nombre, regional, departamento, ciudad }) {
@@ -90,60 +91,37 @@ function crearClave({ nombre, regional, departamento, ciudad }) {
 
 async function cargarTiendas() {
   const rutaArchivo = obtenerRutaArchivo();
+  const filas = await leerCsv(rutaArchivo);
 
-  const workbook = xlsx.readFile(rutaArchivo);
-  const nombreHoja = workbook.SheetNames[0];
+  validarColumnas(filas);
 
-  if (!nombreHoja) {
-    throw new Error('El archivo Excel no contiene hojas');
-  }
-
-  const hoja = xlsx.utils.sheet_to_json(
-    workbook.Sheets[nombreHoja],
-    {
-      header: 1,
-      defval: ''
-    }
-  );
-
-  validarColumnas(hoja);
-
-  const registros = prepararRegistros(hoja);
-
+  const registros = prepararRegistros(filas);
   const validos = [];
   const errores = [];
-  const clavesExcel = new Set();
+  const clavesCsv = new Set();
 
   for (const registro of registros) {
-    const {
-      fila,
-      nombre,
-      regional,
-      departamento,
-      ciudad
-    } = registro;
+    const { fila, nombre, regional, departamento, ciudad } = registro;
 
     if (!nombre || !regional || !departamento || !ciudad) {
       errores.push({
         fila,
         motivo: 'Nombre, regional, departamento y ciudad son obligatorios'
       });
-
       continue;
     }
 
     const clave = crearClave(registro);
 
-    if (clavesExcel.has(clave)) {
+    if (clavesCsv.has(clave)) {
       errores.push({
         fila,
-        motivo: 'Tienda duplicada dentro del archivo Excel'
+        motivo: 'Tienda duplicada dentro del archivo CSV'
       });
-
       continue;
     }
 
-    clavesExcel.add(clave);
+    clavesCsv.add(clave);
     validos.push(registro);
   }
 
@@ -179,13 +157,9 @@ async function cargarTiendas() {
   let creadas = 0;
 
   if (nuevasTiendas.length > 0) {
-    const resultado = await Tienda.insertMany(
-      nuevasTiendas,
-      {
-        ordered: false
-      }
-    );
-
+    const resultado = await Tienda.insertMany(nuevasTiendas, {
+      ordered: false
+    });
     creadas = resultado.length;
   }
 
@@ -193,7 +167,6 @@ async function cargarTiendas() {
   console.log('Carga de tiendas finalizada');
   console.log('');
   console.log(`Archivo: ${path.basename(rutaArchivo)}`);
-  console.log(`Hoja: ${nombreHoja}`);
   console.log(`Registros procesados: ${registros.length}`);
   console.log(`Tiendas creadas: ${creadas}`);
   console.log(`Tiendas ya existentes: ${existentes}`);
@@ -202,7 +175,6 @@ async function cargarTiendas() {
   if (errores.length > 0) {
     console.log('');
     console.log('Detalle de errores:');
-
     errores.forEach((error) => {
       console.log(`Fila ${error.fila}: ${error.motivo}`);
     });

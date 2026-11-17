@@ -10,13 +10,34 @@ const PDFMerger = require('pdf-merger-js');
 
 const Imagen = require('../models/imagen');
 const Informe = require('../models/informe');
-const { actasEnMemoria } = require('./acta');
+const {
+  actasEnMemoria,
+  cargarActaEnMemoria,
+  eliminarActaEnDb
+} = require('./acta');
 const Tienda = require('../models/tienda');
 const { guardarInforme } = require('../services/informeService');
 const cloudinary = require('../utils/cloudinary');
+const {
+  esSesionIdValido,
+  esUrlCloudinarySegura,
+  limpiarTexto,
+  textoBusqueda
+} = require('../utils/validaciones');
 
 const LOGO_CUBICA_URL = 'https://res.cloudinary.com/hg7dbayv/image/upload/v1793290504/LOGO_CUBICA.png';
 const LOGO_D1_URL = 'https://res.cloudinary.com/hg7dbayv/image/upload/v1793290508/D1_LOGO_NUEVO.jpg';
+
+const TTL_VISTA_PREVIA_MS = Math.min(
+  Math.max(
+    Number(process.env.PDF_PREVIEW_TTL_MS) || 24 * 60 * 60 * 1000,
+    60 * 1000
+  ),
+  7 * 24 * 60 * 60 * 1000
+);
+
+let avisoBasePublicaEmitido = false;
+let avisoSecretoPreviewCompartido = false;
 
 function construirNombreArchivoDescarga(numeroIncidencia, tiendaNombre) {
   const incidencia =
@@ -38,7 +59,20 @@ function construirNombreArchivoDescarga(numeroIncidencia, tiendaNombre) {
 }
 
 function obtenerSecretoVistaPrevia() {
-  return process.env.PDF_PREVIEW_SECRET || process.env.JWT_SECRET || process.env.TOKEN_SECRET || '';
+  const secretoEspecifico = process.env.PDF_PREVIEW_SECRET;
+
+  if (secretoEspecifico) return secretoEspecifico;
+
+  const secretoCompartido = process.env.JWT_SECRET || process.env.TOKEN_SECRET || '';
+
+  if (secretoCompartido && !avisoSecretoPreviewCompartido) {
+    console.warn(
+      'PDF_PREVIEW_SECRET no configurado; se reutiliza un secreto existente para firmar vistas previas.'
+    );
+    avisoSecretoPreviewCompartido = true;
+  }
+
+  return secretoCompartido;
 }
 
 function crearTokenVistaPrevia(informeId, nombreArchivo) {
@@ -50,7 +84,8 @@ function crearTokenVistaPrevia(informeId, nombreArchivo) {
 
   const payload = Buffer.from(JSON.stringify({
     id: String(informeId),
-    filename: nombreArchivo
+    filename: nombreArchivo,
+    exp: Date.now() + TTL_VISTA_PREVIA_MS
   })).toString('base64url');
 
   const signature = crypto
@@ -89,6 +124,8 @@ function verificarTokenVistaPrevia(token) {
     if (
       typeof payload.id !== 'string' ||
       typeof payload.filename !== 'string' ||
+      typeof payload.exp !== 'number' ||
+      payload.exp <= Date.now() ||
       !payload.filename.toLowerCase().endsWith('.pdf')
     ) {
       return null;
@@ -101,16 +138,39 @@ function verificarTokenVistaPrevia(token) {
 }
 
 function normalizarUrlPdfCloudinary(url) {
-  if (typeof url !== 'string') return '';
+  if (!esUrlCloudinarySegura(url)) return '';
 
   return url.replace(/\/raw\/upload\/fl_attachment:[^/]+\//i, '/raw/upload/');
 }
 
 function construirUrlVistaPrevia(req, token) {
+  const configurada = String(process.env.PUBLIC_BASE_URL || '')
+    .trim()
+    .replace(/\/+$/, '');
+
+  if (/^https?:\/\/[^/]+$/i.test(configurada)) {
+    return `${configurada}/pdf-preview/${token}`;
+  }
+
+  if (!avisoBasePublicaEmitido) {
+    console.warn(
+      'PUBLIC_BASE_URL no configurado; las URLs de vista previa se derivarán del Host de la petición.'
+    );
+    avisoBasePublicaEmitido = true;
+  }
+
   const protocolo = String(req.get('x-forwarded-proto') || req.protocol)
     .split(',')[0]
-    .trim();
-  const host = req.get('host');
+    .trim()
+    .toLowerCase();
+  const host = String(req.get('host') || '').trim();
+
+  if (
+    !['http', 'https'].includes(protocolo) ||
+    !/^[a-z0-9.-]+(?::\d{1,5})?$/i.test(host)
+  ) {
+    throw new Error('No se pudo construir una URL pública segura para la vista previa');
+  }
 
   return `${protocolo}://${host}/pdf-preview/${token}`;
 }
@@ -159,7 +219,8 @@ previewRouter.get('/:token', async (req, res) => {
     const respuesta = await axios.get(urlPdf, {
       responseType: 'arraybuffer',
       timeout: 30000,
-      maxContentLength: 100 * 1024 * 1024
+      maxContentLength: 100 * 1024 * 1024,
+      maxRedirects: 0
     });
 
     const nombreAscii = payload.filename
@@ -184,7 +245,7 @@ previewRouter.get('/:token', async (req, res) => {
 });
 
 function isCloudinaryUrl(url) {
-  return typeof url === 'string' && /res\.cloudinary\.com/.test(url);
+  return esUrlCloudinarySegura(url);
 }
 
 function insertTransformInCloudinaryUrl(url, transformStr) {
@@ -218,13 +279,21 @@ function buildLogoUrl(url) {
 }
 
 async function safeGetBuffer(url) {
-  if (!url || typeof url !== 'string') return null;
+  if (!esUrlCloudinarySegura(url)) {
+    console.warn('URL no permitida para descarga; se omitió el recurso.');
+    return null;
+  }
 
   try {
-    const resp = await axios.get(url, { responseType: 'arraybuffer' });
+    const resp = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: 30000,
+      maxContentLength: 100 * 1024 * 1024,
+      maxRedirects: 0
+    });
     return Buffer.from(resp.data);
   } catch (err) {
-    console.warn('No se pudo descargar:', url, err?.message || err);
+    console.warn('No se pudo descargar un recurso de Cloudinary:', err?.message || err);
     return null;
   }
 }
@@ -253,11 +322,44 @@ function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
 }
 
 function getPublicIdFromUrl(url) {
-  const match = (url || '').match(
-    /\/v\d+\/(.+)\.(jpg|png|jpeg|webp|gif|heic|heif|bmp|tif|tiff)/i
-  );
+  if (!esUrlCloudinarySegura(url)) return null;
 
-  return match ? match[1] : null;
+  try {
+    const segmentos = new URL(url).pathname.split('/').filter(Boolean);
+    const indiceUpload = segmentos.indexOf('upload');
+
+    if (indiceUpload === -1 || indiceUpload === segmentos.length - 1) {
+      return null;
+    }
+
+    let restantes = segmentos.slice(indiceUpload + 1);
+    const indiceVersion = restantes.findIndex((s) => /^v\d+$/.test(s));
+
+    if (indiceVersion !== -1) {
+      restantes = restantes.slice(indiceVersion + 1);
+    } else {
+      // Sin versión: descarta segmentos de transformación (contienen comas o
+      // prefijos tipo c_/w_/q_) antes del public_id.
+      restantes = restantes.filter(
+        (s) =>
+          !s.includes(',') &&
+          !/^(?:c_|w_|h_|q_|f_|e_|x_|y_|g_|r_|a_|b_|d_|t_|o_|l_|s_|p_|u_)/i.test(s)
+      );
+    }
+
+    if (restantes.length === 0) return null;
+
+    const ultimo = restantes[restantes.length - 1];
+    const extension = path.extname(ultimo);
+
+    if (!extension) return null;
+
+    restantes[restantes.length - 1] = ultimo.slice(0, -extension.length);
+
+    return restantes.join('/') || null;
+  } catch {
+    return null;
+  }
 }
 
 function validarSesionPermitida(req, sesionId) {
@@ -267,9 +369,15 @@ function validarSesionPermitida(req, sesionId) {
     throw err;
   }
 
+  if (!esSesionIdValido(sesionId)) {
+    const err = new Error('sesionId inválido');
+    err.status = 400;
+    throw err;
+  }
+
   if (req.auth.isAdmin) return;
 
-  if (!sesionId || sesionId !== req.auth.sesionId) {
+  if (sesionId !== req.auth.sesionId) {
     const err = new Error('No autorizado para usar esta sesión');
     err.status = 403;
     throw err;
@@ -790,10 +898,7 @@ router.post(
     const { sesionId } = req.params;
 
     try {
-      if (
-        !sesionId ||
-        typeof sesionId !== 'string'
-              ) {
+      if (!esSesionIdValido(sesionId)) {
         return res.status(400).json({
           ok: false,
           error: 'sesionId inválido'
@@ -804,6 +909,8 @@ router.post(
         req,
         sesionId
       );
+
+      await cargarActaEnMemoria(sesionId);
 
       const deleted = {
         imagenesN: 0,
@@ -904,6 +1011,7 @@ router.post(
         }
 
         delete actasEnMemoria[sesionId];
+        await eliminarActaEnDb(sesionId);
       }
 
       cleanupTempsBySession(sesionId);
@@ -1036,13 +1144,7 @@ router.get(
   async (req, res) => {
     const { sesionId } = req.params;
 
-    const tiendaId =
-      (
-        req.query.tiendaId ||
-        ''
-      )
-        .toString()
-        .trim();
+    const tiendaId = limpiarTexto(req.query.tiendaId);
 
     const wantsJson =
       req.query.format === 'json' ||
@@ -1053,13 +1155,19 @@ router.get(
         'application/json'
       );
 
-    const numeroIncidencia =
-      (
-        req.query.numeroIncidencia ||
-        ''
-      )
-        .toString()
-        .trim();
+    if (!esSesionIdValido(sesionId)) {
+      const error = 'sesionId inválido';
+
+      if (wantsJson) {
+        return res.status(400).json({ ok: false, error });
+      }
+
+      return res.status(400).send(error);
+    }
+
+    res.set('Cache-Control', 'no-store');
+
+    const numeroIncidencia = textoBusqueda(req.query.numeroIncidencia, 120);
 
     const geolocalizacion =
       normalizarGeolocalizacionDesdeQuery(
@@ -1067,7 +1175,7 @@ router.get(
       );
 
     let ubicacion =
-      req.query.ubicacion ||
+      textoBusqueda(req.query.ubicacion, 300) ||
       'Sitio no especificado';
 
     let regionalStr = '';
@@ -1386,52 +1494,48 @@ router.get(
           });
         }
 
+        const successfulImageIds =
+          imageResults
+            .filter(
+              (item) =>
+                item.ok &&
+                item.imageId
+            )
+            .map(
+              (item) =>
+                item.imageId
+            );
+
         const failedImageIds =
           imageResults
             .filter(
               (item) =>
                 !item.ok &&
                 item.imageId
-                            )
+            )
             .map(
               (item) =>
                 item.imageId
             );
 
+        // Se eliminan solo los registros cuyo asset fue borrado en Cloudinary.
+        // Un deleteMany por sesión borraría imágenes subidas después de la
+        // consulta inicial, dejando sus archivos huérfanos en la nube.
+        if (successfulImageIds.length > 0) {
+          await Imagen.deleteMany({
+            _id: {
+              $in: successfulImageIds
+            },
+            sesionId
+          });
+        }
+
         if (
           failedImageIds.length > 0
         ) {
-          const successfulImageIds =
-            imageResults
-              .filter(
-                (item) =>
-                  item.ok &&
-                  item.imageId
-              )
-              .map(
-                (item) =>
-                  item.imageId
-              );
-
-          if (
-            successfulImageIds.length > 0
-          ) {
-            await Imagen.deleteMany({
-              _id: {
-                $in:
-                  successfulImageIds
-              },
-              sesionId
-            });
-          }
-
           console.warn(
             `La sesión ${sesionId} conserva ${failedImageIds.length} registro(s) de evidencia porque no se pudieron eliminar correctamente de Cloudinary.`
           );
-        } else {
-          await Imagen.deleteMany({
-            sesionId
-          });
         }
 
         const allActaImagesDeleted =
@@ -1447,6 +1551,7 @@ router.get(
           delete actasEnMemoria[
             sesionId
           ];
+          await eliminarActaEnDb(sesionId);
         } else {
           console.warn(
             `Se conserva temporalmente la información del acta de la sesión ${sesionId} porque algunos archivos no pudieron eliminarse de Cloudinary.`
@@ -1738,6 +1843,8 @@ router.get(
 
       const merger = new PDFMerger();
 
+      await cargarActaEnMemoria(sesionId);
+
       const store = actasEnMemoria[sesionId];
       const actaUrl =
         store?.acta?.url ||
@@ -1929,6 +2036,7 @@ router.get(
       );
 
       let uploadMeta = null;
+      let informeGuardado = false;
 
       try {
         const finalBuffer =
@@ -1959,11 +2067,30 @@ router.get(
               tiendaSeleccionada,
             geolocalizacion
           });
+
+        informeGuardado = true;
       } catch (err) {
         console.error(
           `Error guardando informe ${sesionId}:`,
           err
         );
+      }
+
+      // La limpieza depende solo de que el informe haya quedado guardado.
+      // Así no se omite si después falla la construcción de la respuesta.
+      if (informeGuardado) {
+        try {
+          await cleanupSessionAssetsAsync({
+            imagenes,
+            actaPublicId,
+            actaImgsPublicIds
+          });
+        } catch (cleanupError) {
+          console.warn(
+            'Error durante la limpieza posterior al guardado del informe:',
+            cleanupError?.message || cleanupError
+          );
+        }
       }
 
       if (wantsJson) {
@@ -1999,12 +2126,6 @@ router.get(
         const previewUrl = tokenVistaPrevia
           ? construirUrlVistaPrevia(req, tokenVistaPrevia)
           : null;
-
-        await cleanupSessionAssetsAsync({
-          imagenes,
-          actaPublicId,
-          actaImgsPublicIds
-        });
 
         return res.status(201).json({
           ok: true,
@@ -2057,24 +2178,8 @@ router.get(
       return res.download(
         pdfFinalPath,
         `${nombreArchivo}.pdf`,
-        (downloadError) => {
+        () => {
           cleanupTemps();
-
-          if (!downloadError) {
-            cleanupSessionAssetsAsync({
-              imagenes,
-              actaPublicId,
-              actaImgsPublicIds
-            }).catch(
-              (cleanupError) => {
-                console.warn(
-                  'Error durante la limpieza posterior a la descarga:',
-                  cleanupError?.message ||
-                  cleanupError
-                );
-              }
-            );
-          }
         }
       );
     } catch (err) {

@@ -29,3 +29,10 @@ Thumbs.db
 
 # Cobertura de pruebas
 coverage/
+
+# Archivos temporales subidos por multer
+uploads/*
+!uploads/.gitkeep
+
+# Reportes locales de limpieza (pueden contener identificadores de archivos)
+limpieza-cloudinary-*.json

@@ -19,8 +19,10 @@ for (const p of envCandidates) {
 
 const UsuarioUnico = require('../models/UsuarioUnico');
 
-const CEDULA = '1023975443';
-const NOMBRE = 'MIYER PEREZ PEREZ';
+const CEDULA = String(process.env.USUARIO_DOCUMENTO || process.argv[2] || '').trim();
+const NOMBRE = String(process.env.USUARIO_NOMBRE || process.argv[3] || '')
+  .replace(/\s+/g, ' ')
+  .trim();
 
 
 const mongoUri =
@@ -36,6 +38,12 @@ const SHARED_PASSWORD = process.env.SHARED_PASSWORD || process.env.SHARED_USER_P
 (async () => {
   if (!mongoUri) {
     console.error('Falta MONGODB_URI (o equivalente) en el .env.');
+    process.exit(1);
+  }
+
+  if (!CEDULA || !NOMBRE) {
+    console.error('Debes indicar documento y nombre del usuario.');
+    console.error('Uso: USUARIO_DOCUMENTO=... USUARIO_NOMBRE=... node scripts/insertUsuario.js');
     process.exit(1);
   }
 
@@ -62,8 +70,6 @@ const SHARED_PASSWORD = process.env.SHARED_PASSWORD || process.env.SHARED_USER_P
 
     console.log('Usuario creado:', {
       _id: nuevo._id.toString(),
-      usuario: nuevo.usuario,
-      nombre: nuevo.nombre,
     });
   } else {
     const update = { nombre };
@@ -80,8 +86,6 @@ const SHARED_PASSWORD = process.env.SHARED_PASSWORD || process.env.SHARED_USER_P
 
     console.log('Usuario existente actualizado:', {
       _id: existente._id.toString(),
-      usuario: existente.usuario,
-      nombre,
       passwordActualizada: process.env.FORCE_PASSWORD_RESET === '1' ? 'sí' : 'no',
     });
   }

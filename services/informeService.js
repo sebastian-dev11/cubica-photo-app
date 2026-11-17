@@ -4,6 +4,7 @@ const Informe = require('../models/informe');
 const InformeVersion = require('../models/informeVersion');
 const Sesion = require('../models/sesion');
 const Tienda = require('../models/tienda');
+const UsuarioUnico = require('../models/UsuarioUnico');
 const cloudinary = require('../utils/cloudinary');
 const { regenerarYSubirPdfInforme } = require('./pdfInformeService');
 
@@ -561,10 +562,17 @@ async function resolverAuth({
     if (sesion?.usuarioId) {
       resolvedUserId = sesion.usuarioId.toString();
     }
+  }
 
-    if (!admin && sesion?.isAdmin) {
-      admin = true;
-    }
+  // El rol se resuelve desde el usuario actual en BD, nunca desde un flag de sesión.
+  if (!admin && resolvedUserId) {
+    const usuario = await UsuarioUnico.findById(resolvedUserId)
+      .select('rol usuario')
+      .lean();
+
+    admin =
+      usuario?.rol === 'admin' ||
+      usuario?.usuario === 'admin';
   }
 
   return {

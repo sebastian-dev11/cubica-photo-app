@@ -6,6 +6,12 @@ const {
   eliminarInforme,
   eliminarInformesBulk
 } = require('../services/informeService');
+const {
+  limpiarTexto,
+  textoBusqueda,
+  escaparRegex,
+  esSesionIdValido
+} = require('../utils/validaciones');
 
 function sanitizePagination(page, limit) {
   let p = parseInt(page, 10);
@@ -82,21 +88,27 @@ router.get('/', async (req, res) => {
   try {
     const { page, limit } = sanitizePagination(req.query.page, req.query.limit);
     const {
-      search = '',
+      search,
       userId,
       from,
       to,
-      regional = '',
-      incidencia = ''
+      regional,
+      incidencia
     } = req.query;
+
+    const searchTexto = textoBusqueda(search);
+    const regionalTexto = textoBusqueda(regional, 60);
+    const incidenciaTexto = textoBusqueda(incidencia);
+    const desdeTexto = textoBusqueda(from, 40);
+    const hastaTexto = textoBusqueda(to, 40);
 
     const isAdmin = Boolean(req.auth?.isAdmin);
     const currentUserId = req.auth?.userId;
 
     const query = {};
 
-    if (search) {
-      const rx = new RegExp(search, 'i');
+    if (searchTexto) {
+      const rx = new RegExp(escaparRegex(searchTexto), 'i');
 
       query.$or = [
         { title: rx },
@@ -109,43 +121,45 @@ router.get('/', async (req, res) => {
       ];
     }
 
-    if (regional) {
-      query.regional = regional;
+    if (regionalTexto) {
+      query.regional = regionalTexto;
     }
 
-    if (incidencia) {
+    if (incidenciaTexto) {
       query.numeroIncidencia = {
-        $regex: new RegExp(incidencia, 'i')
+        $regex: new RegExp(escaparRegex(incidenciaTexto), 'i')
       };
     }
 
     if (isAdmin) {
-      if (userId) {
-        if (!mongoose.isValidObjectId(userId)) {
+      const userIdTexto = limpiarTexto(userId);
+
+      if (userIdTexto) {
+        if (!mongoose.isValidObjectId(userIdTexto)) {
           return res.status(400).json({
             error: 'Id de usuario inválido'
           });
         }
 
-        query.generatedBy = userId;
+        query.generatedBy = userIdTexto;
       }
     } else {
       query.generatedBy = currentUserId;
     }
 
-    if (from || to) {
+    if (desdeTexto || hastaTexto) {
       query.createdAt = {};
 
-      if (from) {
-        const d = new Date(from);
+      if (desdeTexto) {
+        const d = new Date(desdeTexto);
 
         if (!isNaN(d)) {
           query.createdAt.$gte = d;
         }
       }
 
-      if (to) {
-        const d = new Date(to);
+      if (hastaTexto) {
+        const d = new Date(hastaTexto);
 
         if (!isNaN(d)) {
           query.createdAt.$lt = d;
@@ -188,13 +202,15 @@ router.get('/', async (req, res) => {
 
 router.get('/utils/ultimo-por-sesion', async (req, res) => {
   try {
-    const targetSesionId = req.query.sesionId;
+    const targetSesionId = textoBusqueda(req.query.sesionId, 128);
 
-    if (!targetSesionId) {
+    if (!esSesionIdValido(targetSesionId)) {
       return res.status(400).json({
-        error: 'Debe enviar ?sesionId=...'
+        error: 'sesionId inválido'
       });
     }
+
+    res.set('Cache-Control', 'no-store');
 
     const isAdmin = Boolean(req.auth?.isAdmin);
 
@@ -243,11 +259,16 @@ router.get('/tienda/:tiendaId', async (req, res) => {
     );
 
     const {
-      search = '',
-      incidencia = '',
+      search,
+      incidencia,
       from,
       to
     } = req.query;
+
+    const searchTexto = textoBusqueda(search);
+    const incidenciaTexto = textoBusqueda(incidencia);
+    const desdeTexto = textoBusqueda(from, 40);
+    const hastaTexto = textoBusqueda(to, 40);
 
     if (!mongoose.isValidObjectId(tiendaId)) {
       return res.status(400).json({
@@ -266,8 +287,8 @@ router.get('/tienda/:tiendaId', async (req, res) => {
       query.generatedBy = currentUserId;
     }
 
-    if (search) {
-      const rx = new RegExp(search, 'i');
+    if (searchTexto) {
+      const rx = new RegExp(escaparRegex(searchTexto), 'i');
 
       query.$or = [
         { title: rx },
@@ -280,25 +301,25 @@ router.get('/tienda/:tiendaId', async (req, res) => {
       ];
     }
 
-    if (incidencia) {
+    if (incidenciaTexto) {
       query.numeroIncidencia = {
-        $regex: new RegExp(incidencia, 'i')
+        $regex: new RegExp(escaparRegex(incidenciaTexto), 'i')
       };
     }
 
-    if (from || to) {
+    if (desdeTexto || hastaTexto) {
       query.createdAt = {};
 
-      if (from) {
-        const d = new Date(from);
+      if (desdeTexto) {
+        const d = new Date(desdeTexto);
 
         if (!isNaN(d)) {
           query.createdAt.$gte = d;
         }
       }
 
-      if (to) {
-        const d = new Date(to);
+      if (hastaTexto) {
+        const d = new Date(hastaTexto);
 
         if (!isNaN(d)) {
           query.createdAt.$lt = d;
@@ -346,6 +367,8 @@ router.get('/:id', async (req, res) => {
 
     const inf = await obtenerInformePermitido(id, req);
 
+    res.set('Cache-Control', 'no-store');
+
     return res.json(mapInforme(inf));
   } catch (err) {
     console.error('Error consultando informe:', err);
@@ -366,9 +389,15 @@ router.post('/bulk-delete', async (req, res) => {
 
     const { ids } = req.body || {};
 
-    if (!Array.isArray(ids) || ids.length === 0) {
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > 500) {
       return res.status(400).json({
-        error: 'Debe enviar un arreglo "ids" con al menos un id.'
+        error: 'Debe enviar un arreglo "ids" de entre 1 y 500 ids.'
+      });
+    }
+
+    if (!ids.every((id) => mongoose.isValidObjectId(id))) {
+      return res.status(400).json({
+        error: 'Uno o más ids de informe son inválidos.'
       });
     }
 

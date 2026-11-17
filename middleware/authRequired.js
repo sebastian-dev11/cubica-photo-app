@@ -1,6 +1,9 @@
 const jwt = require('jsonwebtoken');
 const Sesion = require('../models/sesion');
 const UsuarioUnico = require('../models/UsuarioUnico');
+const { esSesionIdValido } = require('../utils/validaciones');
+
+const ALGORITMO_JWT = 'HS256';
 
 function getToken(req) {
   const authHeader = req.headers.authorization || '';
@@ -34,9 +37,17 @@ module.exports = async function authRequired(req, res, next) {
       });
     }
 
-    const payload = jwt.verify(token, getJwtSecret());
+    const payload = jwt.verify(token, getJwtSecret(), {
+      algorithms: [ALGORITMO_JWT]
+    });
 
-    if (!payload?.userId || !payload?.sesionId) {
+    if (
+      !payload?.userId ||
+      !payload?.sesionId ||
+      typeof payload.userId !== 'string' ||
+      !esSesionIdValido(payload.sesionId) ||
+      !/^[a-f\d]{24}$/i.test(payload.userId)
+    ) {
       return res.status(401).json({
         error: 'Token inválido'
       });
@@ -75,23 +86,38 @@ module.exports = async function authRequired(req, res, next) {
       });
     }
 
+    if (usuario.activo === false) {
+      return res.status(403).json({
+        error: 'Usuario inactivo'
+      });
+    }
+
     await Sesion.updateOne(
       { _id: sesion._id },
       { $set: { ultimaActividad: new Date() } }
     );
 
+    // El rol se toma del estado actual en base de datos, no del token ni de
+    // la sesión, para que una degradación de privilegios sea inmediata.
+    const isAdmin =
+      usuario.rol === 'admin' ||
+      usuario.usuario === 'admin';
+
+    res.set('Cache-Control', 'no-store');
+
     req.auth = {
       userId: usuario._id.toString(),
       usuario: usuario.usuario,
       nombre: usuario.nombre || 'Tecnico',
-      isAdmin: Boolean(payload.isAdmin) || Boolean(sesion.isAdmin) || usuario.usuario === 'admin',
+      rol: usuario.rol || 'tecnico',
+      isAdmin,
       sesionId: payload.sesionId
     };
 
     req.user = usuario;
     req.userId = usuario._id.toString();
     req.sesionId = payload.sesionId;
-    req.isAdmin = req.auth.isAdmin;
+    req.isAdmin = isAdmin;
 
     return next();
   } catch (err) {
@@ -107,7 +133,7 @@ module.exports = async function authRequired(req, res, next) {
       });
     }
 
-    console.error('authRequired error:', err);
+    console.error('authRequired error:', err?.message || err);
 
     return res.status(err.status || 500).json({
       error: err.status ? err.message : 'Error de autenticación'

@@ -26,7 +26,7 @@ const mongoUri =
   process.env.DATABASE_URL;
 
 const adminUser = process.env.ADMIN_USER || 'admin';
-const nuevaPassword = process.argv[2] || process.env.ADMIN_PASSWORD;
+const nuevaPassword = process.env.ADMIN_PASSWORD || '';
 
 async function main() {
   if (!mongoUri) {
@@ -34,9 +34,9 @@ async function main() {
     process.exit(1);
   }
 
-  if (!nuevaPassword) {
-    console.error('Debes enviar la nueva contraseña.');
-    console.error('Ejemplo: node scripts/resetAdminPassword.js 123456');
+  if (nuevaPassword.length < 8 || nuevaPassword.length > 128) {
+    console.error('ADMIN_PASSWORD debe tener entre 8 y 128 caracteres.');
+    console.error('No pases la contraseña por argumentos; usa una variable de entorno.');
     process.exit(1);
   }
 

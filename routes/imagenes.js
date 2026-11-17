@@ -1,22 +1,42 @@
+const crypto = require('crypto');
 const express = require('express');
+const fs = require('fs');
+const multer = require('multer');
+const path = require('path');
+
 const router = express.Router();
 const Imagen = require('../models/imagen');
 const cloudinary = require('../utils/cloudinary.js');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const {
+  limpiarTexto,
+  textoBusqueda,
+  esSesionIdValido
+} = require('../utils/validaciones');
+
+const DIRECTORIO_UPLOADS = path.join(__dirname, '../uploads');
+fs.mkdirSync(DIRECTORIO_UPLOADS, { recursive: true });
+
+const MIME_A_EXTENSION = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'image/bmp': '.bmp',
+  'image/heic': '.heic',
+  'image/heif': '.heif',
+  'image/tiff': '.tiff'
+};
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, 'uploads/'),
+  destination: (req, file, cb) => cb(null, DIRECTORIO_UPLOADS),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const nombre = `${Date.now()}${ext}`;
-    cb(null, nombre);
+    const extension = MIME_A_EXTENSION[file.mimetype] || '.bin';
+    cb(null, `${Date.now()}-${crypto.randomUUID()}${extension}`);
   }
 });
 
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype && file.mimetype.startsWith('image/')) {
+  if (Object.prototype.hasOwnProperty.call(MIME_A_EXTENSION, file.mimetype)) {
     return cb(null, true);
   }
 
@@ -27,7 +47,10 @@ const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 15 * 1024 * 1024
+    fileSize: 15 * 1024 * 1024,
+    files: 1,
+    fields: 20,
+    parts: 25
   }
 });
 
@@ -41,10 +64,6 @@ function limpiarArchivoLocal(filePath) {
   }
 }
 
-function limpiarTexto(valor) {
-  return typeof valor === 'string' ? valor.replace(/\s+/g, ' ').trim() : '';
-}
-
 function validarSesionPermitida(req, sesionId) {
   if (!req.auth) {
     const err = new Error('Autenticación requerida');
@@ -52,9 +71,15 @@ function validarSesionPermitida(req, sesionId) {
     throw err;
   }
 
+  if (!esSesionIdValido(sesionId)) {
+    const err = new Error('sesionId inválido');
+    err.status = 400;
+    throw err;
+  }
+
   if (req.auth.isAdmin) return;
 
-  if (!sesionId || sesionId !== req.auth.sesionId) {
+  if (sesionId !== req.auth.sesionId) {
     const err = new Error('No autorizado para usar esta sesión');
     err.status = 403;
     throw err;
@@ -64,15 +89,15 @@ function validarSesionPermitida(req, sesionId) {
 router.post('/subir', upload.single('imagen'), async (req, res) => {
   const sesionId = limpiarTexto(req.body.sesionId || req.auth?.sesionId || '');
   const tipo = limpiarTexto(req.body.tipo);
-  const ubicacion = limpiarTexto(req.body.ubicacion);
-  const observacion = limpiarTexto(req.body.observacion);
+  const ubicacion = textoBusqueda(req.body.ubicacion, 300);
+  const observacion = textoBusqueda(req.body.observacion, 1000);
 
   try {
-    if (!req.file || !sesionId || !tipo || !ubicacion) {
+    if (!req.file || !tipo || !ubicacion) {
       limpiarArchivoLocal(req.file?.path);
 
       return res.status(400).json({
-        mensaje: 'Falta imagen, sesionId, tipo o ubicación'
+        mensaje: 'Falta imagen, tipo o ubicación'
       });
     }
 
@@ -91,14 +116,21 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
       resource_type: 'image'
     });
 
-    const nombreBase = path.basename(req.file.originalname, path.extname(req.file.originalname))
+    const nombreOriginal = textoBusqueda(
+      path.basename(req.file.originalname || ''),
+      200
+    );
+    const nombreBase = nombreOriginal
+      .replace(path.extname(nombreOriginal), '')
       .toLowerCase()
       .trim()
-      .replace(/\s+/g, '_');
+      .replace(/[^a-z0-9_-]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 120) || 'imagen';
 
     const nuevaImagen = new Imagen({
       nombreOriginal: nombreBase,
-      nombreArchivoOriginal: req.file.originalname,
+      nombreArchivoOriginal: nombreOriginal,
       url: resultado.secure_url,
       sesionId,
       tipo,
@@ -120,7 +152,7 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
   } catch (err) {
     limpiarArchivoLocal(req.file?.path);
 
-    console.error('Error al subir imagen:', err);
+    console.error('Error al subir imagen:', err?.message || err);
 
     return res.status(err.status || 500).json({
       mensaje: err.status ? err.message : 'Error interno al subir imagen'

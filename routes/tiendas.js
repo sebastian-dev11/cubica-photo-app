@@ -3,10 +3,8 @@ const mongoose = require('mongoose');
 const router = express.Router();
 const Tienda = require('../models/tienda');
 const adminOnly = require('../middleware/adminOnly');
+const { limpiarTexto, textoBusqueda } = require('../utils/validaciones');
 
-function limpiarTexto(valor) {
-  return typeof valor === 'string' ? valor.replace(/\s+/g, ' ').trim() : '';
-}
 
 function escaparRegex(valor) {
   return String(valor).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -97,7 +95,7 @@ router.get('/', async (req, res) => {
     const regional = limpiarTexto(req.query.regional);
     const ciudad = limpiarTexto(req.query.ciudad);
     const departamento = limpiarTexto(req.query.departamento);
-    const search = limpiarTexto(req.query.search);
+    const search = textoBusqueda(req.query.search, 100);
 
     const filtro = crearFiltro({
       regional,

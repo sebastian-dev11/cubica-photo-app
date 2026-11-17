@@ -2,16 +2,21 @@ const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const UsuarioUnico = require('../models/UsuarioUnico');
+const Sesion = require('../models/sesion');
 const authRequired = require('../middleware/authRequired');
 const adminOnly = require('../middleware/adminOnly');
+const {
+  limpiarTexto,
+  textoBusqueda,
+  escaparRegex
+} = require('../utils/validaciones');
 
 const router = express.Router();
 
-router.use(authRequired, adminOnly);
-
-function limpiarTexto(valor) {
-  return typeof valor === 'string' ? valor.replace(/\s+/g, ' ').trim() : '';
-}
+router.use(authRequired, adminOnly, (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  return next();
+});
 
 function validarId(id) {
   return mongoose.isValidObjectId(id);
@@ -42,20 +47,31 @@ function obtenerPassword(body) {
 }
 
 function validarPassword(password) {
-  return typeof password === 'string' && password.trim().length >= 8;
+  return (
+    typeof password === 'string' &&
+    password.trim().length >= 8 &&
+    password.length <= 128
+  );
 }
 
 function validarRol(rol) {
   return ['admin', 'tecnico'].includes(rol);
 }
 
+async function invalidarSesiones(usuarioId) {
+  await Sesion.updateMany(
+    { usuarioId },
+    { $set: { activa: false, ultimaActividad: new Date() } }
+  );
+}
+
 router.get('/', async (req, res) => {
   try {
-    const search = limpiarTexto(req.query.search || '');
+    const search = textoBusqueda(req.query.search, 100);
     const query = {};
 
     if (search) {
-      const rx = new RegExp(search, 'i');
+      const rx = new RegExp(escaparRegex(search), 'i');
 
       query.$or = [
         { usuario: rx },
@@ -250,6 +266,10 @@ router.put('/:id', async (req, res) => {
 
     await usuarioActual.save();
 
+    if (activo === false) {
+      await invalidarSesiones(usuarioActual._id);
+    }
+
     return res.json({
       ok: true,
       mensaje: 'Usuario actualizado correctamente',
@@ -298,6 +318,7 @@ router.patch('/:id/password', async (req, res) => {
     usuario.contraseña = await bcrypt.hash(password, 10);
 
     await usuario.save();
+    await invalidarSesiones(usuario._id);
 
     return res.json({
       ok: true,
@@ -346,6 +367,10 @@ router.patch('/:id/status', async (req, res) => {
     usuario.activo = activo;
 
     await usuario.save();
+
+    if (activo === false) {
+      await invalidarSesiones(usuario._id);
+    }
 
     return res.json({
       ok: true,

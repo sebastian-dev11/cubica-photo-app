@@ -7,13 +7,18 @@ Características principales
 - Asociación de sesiones a tiendas físicas (nombre, ciudad, departamento).
 - Generación de informes técnicos en PDF con imágenes emparejadas y observaciones.
 - Fusión opcional de actas técnicas en PDF con el informe principal.
+- Escaneo de actas estilo CamScanner: detección de esquinas, corrección de perspectiva, filtros de color y PDF multipágina.
 - Limpieza automática de archivos temporales y recursos en Cloudinary.
 
  Estructura del proyecto
 ├── app.js                  # Configuración principal del servidor
 ├── db.js                   # Conexión a MongoDB
 ├── models/                 # Esquemas de Mongoose
+│   ├── actaDocumento.js
 │   ├── imagen.js
+│   ├── informe.js
+│   ├── informeVersion.js
+│   ├── sesion.js
 │   ├── tienda.js
 │   └── UsuarioUnico.js
 ├── routes/                 # Rutas HTTP
@@ -23,7 +28,10 @@ Características principales
 │   ├── acta.js
 │   └── tiendas.js
 ├── utils/                  # Utilidades compartidas
+│   ├── actaScanner.js
 │   └── cloudinary.js
+├── docs/                   # Documentación adicional
+│   └── ESCANER_ACTAS.md
 ├── uploads/                # Carpeta temporal para archivos locales
 ├── .env                    # Variables de entorno
 └── package.json            # Dependencias y scripts
@@ -102,8 +110,8 @@ POST /auth/login
 Autentica al usuario único registrado en el sistema.
 Request
 {
-  "usuario": "admin",
-  "contraseña": "123456"
+  "usuario": "<usuario>",
+  "contraseña": "<contraseña>"
 }
 
 
@@ -115,8 +123,10 @@ Response (éxito)
 
 
 Seguridad
-- Utiliza bcrypt para comparar contraseñas cifradas.
-- No genera JWT ni sesión persistente.
+- Utiliza bcryptjs para comparar contraseñas cifradas.
+- Genera un JWT HS256 y una sesión persistente en MongoDB.
+- Responde con un mensaje genérico para credenciales incorrectas.
+- Aplica límite de intentos por IP/usuario (configurable con `LOGIN_MAX_ATTEMPTS` y `LOGIN_WINDOW_MS`).
 
 POST /imagenes/subir
 Sube una imagen clasificada como previa o posterior, asociada a una sesión y ubicación.
@@ -153,17 +163,36 @@ Proceso
 - Limpieza de imágenes y registros.
 
 POST /acta/subir
-Sube un archivo PDF de acta técnica asociado a una sesión. Se guarda temporalmente en memoria y en Cloudinary como recurso raw.
+Sube una o varias fotos de acta, las escanea (detección del documento, corrección de perspectiva y filtros) y opcionalmente un PDF de acta. La referencia completa está en [docs/ESCANER_ACTAS.md](docs/ESCANER_ACTAS.md).
 Campos (form-data)
 | Campo | Tipo | Requerido | Descripción | 
-| acta | File | ✅ | Archivo PDF. | 
-| sesionId | String | ✅ | ID de la sesión. | 
+| acta | File | ❌ | PDF de acta existente. |
+| imagenes | File[] | ❌* | Hasta 20 fotos del acta. |
+| sesionId | String | ✅ | ID de la sesión. |
+| scanMode | String | ❌ | `original`, `soft`, `clean` (default) o `bn`. |
+| crop | String | ❌ | `auto` (default) o `none`. |
+| quad / quads | JSON | ❌ | Esquinas manuales de una o varias páginas. |
+
+
+\* Se requiere al menos `acta` o `imagenes`.
 
 
 Proceso
-- Subida directa desde buffer con streamifier.
-- Almacenamiento temporal en actasEnMemoria.
-- Eliminación tras fusión en PDF final.
+- Detección de bordes y corrección de perspectiva con `sharp`.
+- Filtros de mejora de color o blanco y negro.
+- Subida de las páginas procesadas a Cloudinary.
+- Persistencia en MongoDB (`actasdocumentos`) con copia en memoria.
+- Eliminación tras la fusión en el PDF final del informe.
+
+También disponibles:
+- `POST /acta/detectar`: devuelve las 4 esquinas del documento.
+- `POST /acta/procesar`: vista previa con el filtro aplicado.
+- `POST /acta/:sesionId/pagina`: agrega una página escaneada.
+- `GET /acta/:sesionId`: consulta las páginas del acta.
+- `GET /acta/:sesionId/pdf`: genera el PDF multipágina del acta.
+- `PATCH /acta/:sesionId/orden`: reordena las páginas.
+- `DELETE /acta/:sesionId/item`: elimina una página.
+- `DELETE /acta/:sesionId`: elimina el acta completa.
 
 GET /tiendas
 Devuelve todas las tiendas registradas en la base de datos.
@@ -288,7 +317,8 @@ app.listen(PORT, () => {
 
 Consideraciones técnicas
 - Las rutas /login y /crear apuntan al mismo controlador que /auth; pueden consolidarse o especializarse según el flujo deseado.
-- No se incluye manejo de errores globales ni protección de rutas; se recomienda agregar middlewares para autenticación, logging y validación.
+- Las rutas de imágenes, PDF, actas, informes, tiendas y usuarios requieren autenticación.
+- Existe un manejador global de errores que no expone stack traces al cliente.
 
 Instalación y dependencias
 Este proyecto utiliza Node.js y npm para gestionar sus dependencias. A continuación se detallan los pasos para instalarlo y las librerías clave que lo componen.
@@ -326,20 +356,39 @@ Dependencias clave
 | cloudinary | Subida y eliminación de imágenes/PDFs en la nube. | 
 | streamifier | Convierte buffers en streams para subir PDFs. | 
 | axios | Cliente HTTP para descargar imágenes y actas. | 
-| pdfkit | Generación de PDFs personalizados. | 
-| pdf-merger-js | Fusión de múltiples PDFs. | 
-| bcryptjs / bcrypt | Cifrado y comparación de contraseñas. | 
-| jsonwebtoken | (Instalado pero no usado) Gestión de tokens JWT. | 
-| image-size | (Instalado pero no usado) Obtención de dimensiones de imágenes. | 
-| mysql2 | (Instalado pero no usado) Cliente para bases de datos MySQL. | 
-| pdf-lib | (Instalado pero no usado) Manipulación avanzada de PDFs. | 
+| pdfkit | Generación de PDFs personalizados. |
+| sharp | Procesamiento de imágenes, detección de documento y filtros de escaneo. |
+| pdf-merger-js | Fusión de múltiples PDFs. |
+| bcryptjs | Cifrado y comparación de contraseñas. |
+| jsonwebtoken | Gestión de tokens JWT HS256. |
+| csv-parser | Lectura de archivos CSV en scripts de carga. |
 
 
 
 Recomendaciones
-- Consolidar el uso de bcrypt o bcryptjs para evitar redundancia.
-- Eliminar dependencias no utilizadas para reducir el tamaño del proyecto.
+- Usar bcryptjs de forma exclusiva; se eliminaron dependencias no utilizadas.
 - Validar que las claves de Cloudinary y MongoDB estén protegidas en producción.
+- No publicar reportes de limpieza: pueden contener public IDs y nombres de informes.
+
+Variables de seguridad recomendadas
+| Variable | Descripción |
+| FRONTEND_URL | Origen del frontend permitido por CORS. |
+| CORS_ORIGINS | Lista separada por comas de orígenes permitidos por CORS. |
+| PUBLIC_BASE_URL | Base pública absoluta del backend para construir enlaces de vista previa. |
+| JWT_SECRET | Secreto HS256 para firmar tokens; debe ser aleatorio y rotarse periódicamente. |
+| PDF_PREVIEW_SECRET | Secreto para firmar enlaces de vista previa de PDF. |
+| PDF_PREVIEW_TTL_MS | Vigencia de los enlaces de vista previa (por defecto 24 h, máximo 7 días). |
+| LOGIN_MAX_ATTEMPTS | Intentos de login permitidos por ventana (por defecto 20). |
+| LOGIN_WINDOW_MS | Ventana de bloqueo de login en milisegundos (por defecto 15 min). |
+| TRUST_PROXY | Número de proxies confiables para obtener la IP real del cliente. |
+
+Notas de seguridad
+- Si `FRONTEND_URL`/`CORS_ORIGINS` no están configurados, CORS queda permisivo y se emite una advertencia en arranque. Si contienen un origen inválido, el arranque falla en lugar de desactivar el control. Configúralos en producción.
+- Si `TRUST_PROXY` no está configurado, se emite una advertencia: el throttle de login usará la IP del socket y HSTS no se derivará de `X-Forwarded-Proto`.
+- Un usuario inactivo recibe el mismo mensaje genérico `Credenciales incorrectas` (401) para no revelar el estado de la cuenta.
+- Los enlaces de vista previa generados antes de la reincorporación de `exp` dejan de funcionar; deben generarse nuevamente.
+- El throttle de login y el estado de sesiones viven en memoria/MongoDB de una sola instancia; en despliegues multi-instancia usa un store compartido.
+- Los enlaces de vista previa están firmados pero el PDF se sirve desde una URL pública de Cloudinary. Para exigir autenticación real en el archivo, configura el recurso como privado/firmado y sirve el PDF a través del backend.
 
 
 

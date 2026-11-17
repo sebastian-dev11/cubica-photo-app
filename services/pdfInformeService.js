@@ -5,12 +5,15 @@ const path = require('path');
 const PDFMerger = require('pdf-merger-js');
 const crypto = require('crypto');
 const cloudinary = require('../utils/cloudinary');
+const {
+  esUrlCloudinarySegura
+} = require('../utils/validaciones');
 
 const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1773871245/LOGO_CUBICA_NUEVO_v3rsq5.jpg';
 const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1773875275/D1_LOGO_NUEVO_kj1bdh.jpg';
 
 function isCloudinaryUrl(url) {
-  return typeof url === 'string' && /res\.cloudinary\.com/.test(url);
+  return esUrlCloudinarySegura(url);
 }
 
 function insertTransformInCloudinaryUrl(url, transformStr) {
@@ -85,13 +88,21 @@ function toPlain(value) {
 }
 
 async function safeGetBuffer(url) {
-  if (!url || typeof url !== 'string') return null;
+  if (!esUrlCloudinarySegura(url)) {
+    console.warn('URL no permitida para descarga; se omitió el recurso.');
+    return null;
+  }
 
   try {
-    const resp = await axios.get(url, { responseType: 'arraybuffer' });
+    const resp = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: 30000,
+      maxContentLength: 100 * 1024 * 1024,
+      maxRedirects: 0
+    });
     return Buffer.from(resp.data);
   } catch (err) {
-    console.warn('No se pudo descargar:', url, err?.message || err);
+    console.warn('No se pudo descargar un recurso de Cloudinary:', err?.message || err);
     return null;
   }
 }
