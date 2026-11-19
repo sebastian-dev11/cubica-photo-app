@@ -1,14 +1,15 @@
 Cubica PhotApp – Backend
-Cubica PhotApp es una aplicación backend diseñada para gestionar sesiones fotográficas técnicas, subir imágenes clasificadas como "previas" y "posteriores", generar informes PDF con evidencia visual, y asociar cada sesión a una tienda física. Está construida con Node.js, Express y MongoDB, e integra servicios como Cloudinary para almacenamiento de archivos y PDFKit para generación de documentos.
+Cubica PhotApp es una aplicación backend diseñada para gestionar sesiones fotográficas técnicas, subir imágenes clasificadas como "previas" y "posteriores", generar informes PDF con evidencia visual, y asociar cada sesión a una tienda física. Está construida con Node.js, Express y MongoDB. Admite Cloudinary para archivos heredados y Cloudflare R2 para archivos nuevos; utiliza PDFKit para generar documentos.
 
 Características principales
 - Autenticación con usuario único y contraseña cifrada.
-- Subida de imágenes con validación, normalización y almacenamiento en Cloudinary.
+- Subida temporal de imágenes y actas a Cloudflare R2 o Cloudinary.
 - Asociación de sesiones a tiendas físicas (nombre, ciudad, departamento).
 - Generación de informes técnicos en PDF con imágenes emparejadas y observaciones.
 - Fusión opcional de actas técnicas en PDF con el informe principal.
 - Escaneo de actas estilo CamScanner: detección de esquinas, corrección de perspectiva, filtros de color y PDF multipágina.
-- Limpieza automática de archivos temporales y recursos en Cloudinary.
+- Limpieza de evidencias y actas tras guardar correctamente el informe.
+- Almacenamiento privado de PDFs finales en Cloudflare R2, con enlaces de vista previa firmados.
 
  Estructura del proyecto
 ├── app.js                  # Configuración principal del servidor
@@ -29,7 +30,9 @@ Características principales
 │   └── tiendas.js
 ├── utils/                  # Utilidades compartidas
 │   ├── actaScanner.js
-│   └── cloudinary.js
+│   ├── cloudinary.js
+│   ├── objectStorage.js
+│   └── pdfPreview.js
 ├── docs/                   # Documentación adicional
 │   └── ESCANER_ACTAS.md
 ├── uploads/                # Carpeta temporal para archivos locales
@@ -57,7 +60,7 @@ const imagenSchema = new mongoose.Schema({
 Campos clave:
 | Campo | Tipo | Descripción | 
 | nombreOriginal | String | Nombre normalizado del archivo (minúsculas, sin espacios). | 
-| url | String | URL pública del archivo en Cloudinary. | 
+| url | String | Referencia del archivo en su proveedor (`r2://…` para R2; URL para Cloudinary heredado). |
 | tipo | String | "previa" o "posterior", usado para agrupar en PDF. | 
 | ubicacion | String | Información contextual de la imagen. | 
 | observacion | String | Comentario opcional. | 
@@ -141,7 +144,7 @@ Campos (form-data)
 
 Proceso
 - Validación de campos.
-- Subida a Cloudinary.
+- Subida al proveedor indicado por `STORAGE_PROVIDER`.
 - Normalización del nombre.
 - Registro en MongoDB.
 - Eliminación del archivo temporal.
@@ -156,11 +159,11 @@ Parámetros
 
 
 Proceso
-- Descarga de imágenes desde Cloudinary.
+- Descarga de imágenes desde R2 o Cloudinary y optimización con `sharp`.
 - Emparejamiento previa / posterior.
 - Renderizado con PDFKit.
 - Fusión con acta técnica (si existe).
-- Limpieza de imágenes y registros.
+- Solo si todas las evidencias se procesan y el PDF se guarda: limpieza de archivos temporales y registros.
 
 POST /acta/subir
 Sube una o varias fotos de acta **tal cual se cargan** (sin recorte ni filtros) y opcionalmente un PDF de acta. La referencia completa está en [docs/ESCANER_ACTAS.md](docs/ESCANER_ACTAS.md).
@@ -177,9 +180,9 @@ Los campos `scanMode`, `crop` y `quad`/`quads` se ignoran en esta ruta: las imá
 
 
 Proceso
-- Subida de las imágenes originales a Cloudinary (sin recodificar).
+- Subida temporal de las imágenes originales al proveedor configurado.
 - Persistencia en MongoDB (`actasdocumentos`) con copia en memoria.
-- Eliminación tras la fusión en el PDF final del informe.
+- Eliminación tras guardar correctamente el PDF final del informe.
 
 También disponibles:
 - `POST /acta/detectar`: devuelve las 4 esquinas del documento (informativo).
@@ -212,7 +215,7 @@ Utilidades
 El proyecto incluye módulos auxiliares para configurar servicios externos y establecer la conexión con la base de datos. Estas utilidades permiten centralizar la lógica de infraestructura y mantener el código modular.
 
 utils/cloudinary.js
-Configura la conexión con Cloudinary para subir y eliminar archivos (imágenes y PDFs).
+Configura Cloudinary para conservar el acceso a archivos heredados y permitir usarlo como proveedor alternativo.
 Configuración
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -229,9 +232,10 @@ Variables requeridas
 
 
 Uso en el proyecto
-- Subida de imágenes (imagenes.js)
-- Subida y eliminación de actas (acta.js, pdf.js)
-- Eliminación de recursos tras generación de PDF
+- Lectura y eliminación de archivos antiguos de Cloudinary.
+
+utils/objectStorage.js
+Selecciona el proveedor de nuevas subidas y centraliza carga, descarga, enlaces temporales, optimización y eliminación para R2/Cloudinary.
 
 db.js
 Establece la conexión con MongoDB usando Mongoose. Detiene el servidor si la conexión falla.
@@ -336,6 +340,19 @@ MONGO_URI=tu_uri_de_mongodb
 CLOUDINARY_CLOUD_NAME=tu_nombre_cloudinary
 CLOUDINARY_API_KEY=tu_api_key
 CLOUDINARY_API_SECRET=tu_api_secret
+STORAGE_PROVIDER=r2
+R2_ACCOUNT_ID=tu_account_id
+R2_BUCKET_NAME=nombre-del-bucket
+R2_ACCESS_KEY_ID=tu_access_key
+R2_SECRET_ACCESS_KEY=tu_secret_key
+R2_REGION=auto
+R2_SIGNED_URL_TTL_SECONDS=86400
+
+`R2_ENDPOINT` es opcional; por defecto se construye con `R2_ACCOUNT_ID`. Conserva las variables de Cloudinary mientras existan informes antiguos allí. Para volver temporalmente al proveedor anterior, configura `STORAGE_PROVIDER=cloudinary`.
+
+Los archivos existentes no se migran automáticamente: se siguen leyendo desde Cloudinary. Las subidas nuevas usan el proveedor indicado en `STORAGE_PROVIDER`.
+
+Configura en R2 una regla de ciclo de vida para borrar objetos abandonados bajo `evidencias/` y `actas/` después del plazo de retención que definas. No apliques esa regla al prefijo `informes/`, que contiene los PDFs finales.
 
 
 - Inicia el servidor:
@@ -351,8 +368,9 @@ Dependencias clave
 | cors | Permite solicitudes cross-origin. | 
 | multer | Manejo de archivos en formularios (memoria y disco). | 
 | cloudinary | Subida y eliminación de imágenes/PDFs en la nube. | 
-| streamifier | Convierte buffers en streams para subir PDFs. | 
-| axios | Cliente HTTP para descargar imágenes y actas. | 
+| @aws-sdk/client-s3 | Acceso S3-compatible a Cloudflare R2. |
+| @aws-sdk/s3-request-presigner | Enlaces temporales para leer objetos privados en R2. |
+| axios | Descarga controlada de archivos heredados de Cloudinary. |
 | pdfkit | Generación de PDFs personalizados. |
 | sharp | Procesamiento de imágenes, detección de documento y filtros de escaneo. |
 | pdf-merger-js | Fusión de múltiples PDFs. |
@@ -373,8 +391,14 @@ Variables de seguridad recomendadas
 | CORS_ORIGINS | Lista separada por comas de orígenes permitidos por CORS. |
 | PUBLIC_BASE_URL | Base pública absoluta del backend para construir enlaces de vista previa. |
 | JWT_SECRET | Secreto HS256 para firmar tokens; debe ser aleatorio y rotarse periódicamente. |
-| PDF_PREVIEW_SECRET | Secreto para firmar enlaces de vista previa de PDF. |
-| PDF_PREVIEW_TTL_MS | Vigencia de los enlaces de vista previa (por defecto 24 h, máximo 7 días). |
+| PDF_PREVIEW_SECRET | Secreto estable para firmar enlaces permanentes de vista previa de PDF. |
+| STORAGE_PROVIDER | Proveedor de nuevas subidas: `r2` o `cloudinary` (predeterminado: `cloudinary`). |
+| R2_ACCOUNT_ID | Identificador de cuenta Cloudflare usado para construir el endpoint S3 de R2. |
+| R2_ENDPOINT | Endpoint S3 de R2 opcional; normalmente se construye con `R2_ACCOUNT_ID`. |
+| R2_BUCKET_NAME | Nombre del bucket privado. |
+| R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY | Credenciales de API de R2 con permisos sobre el bucket. |
+| R2_REGION | Región de compatibilidad S3; para R2 normalmente `auto`. |
+| R2_SIGNED_URL_TTL_SECONDS | Vigencia de enlaces firmados para imágenes temporales (por defecto 86 400 s). |
 | LOGIN_MAX_ATTEMPTS | Intentos de login permitidos por ventana (por defecto 20). |
 | LOGIN_WINDOW_MS | Ventana de bloqueo de login en milisegundos (por defecto 15 min). |
 | TRUST_PROXY | Número de proxies confiables para obtener la IP real del cliente. |
@@ -383,9 +407,6 @@ Notas de seguridad
 - Si `FRONTEND_URL`/`CORS_ORIGINS` no están configurados, CORS queda permisivo y se emite una advertencia en arranque. Si contienen un origen inválido, el arranque falla en lugar de desactivar el control. Configúralos en producción.
 - Si `TRUST_PROXY` no está configurado, se emite una advertencia: el throttle de login usará la IP del socket y HSTS no se derivará de `X-Forwarded-Proto`.
 - Un usuario inactivo recibe el mismo mensaje genérico `Credenciales incorrectas` (401) para no revelar el estado de la cuenta.
-- Los enlaces de vista previa generados antes de la reincorporación de `exp` dejan de funcionar; deben generarse nuevamente.
+- Los enlaces de vista previa no expiran: permanecen disponibles mientras exista el informe y su PDF en el almacenamiento. Mantén estable `PDF_PREVIEW_SECRET` (o el secreto de respaldo usado para firmarlos); cambiarlo invalida los enlaces existentes.
 - El throttle de login y el estado de sesiones viven en memoria/MongoDB de una sola instancia; en despliegues multi-instancia usa un store compartido.
-- Los enlaces de vista previa están firmados pero el PDF se sirve desde una URL pública de Cloudinary. Para exigir autenticación real en el archivo, configura el recurso como privado/firmado y sirve el PDF a través del backend.
-
-
-
+- Los PDFs nuevos de R2 se guardan en un bucket privado y se sirven mediante enlaces firmados permanentes de la aplicación. Cada apertura comprueba el informe y recupera el PDF desde R2. Los informes antiguos conservan sus URLs de Cloudinary mientras exista el recurso allí.

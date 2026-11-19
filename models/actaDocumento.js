@@ -4,6 +4,8 @@ const actaPdfSchema = new mongoose.Schema(
   {
     url: { type: String, required: true },
     public_id: { type: String, required: true },
+    storageProvider: { type: String, enum: ['', 'cloudinary', 'r2'], default: '' },
+    storageKey: { type: String, default: '' },
     nombre: { type: String, default: '' },
     mimetype: { type: String, default: 'application/pdf' },
     size: { type: Number, default: null },
@@ -16,6 +18,8 @@ const imagenActaSchema = new mongoose.Schema(
   {
     url: { type: String, required: true },
     public_id: { type: String, required: true },
+    storageProvider: { type: String, enum: ['', 'cloudinary', 'r2'], default: '' },
+    storageKey: { type: String, default: '' },
     nombre: { type: String, default: '' },
     width: { type: Number, default: null },
     height: { type: Number, default: null },

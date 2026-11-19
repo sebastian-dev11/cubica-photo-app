@@ -6,7 +6,7 @@ const path = require('path');
 
 const router = express.Router();
 const Imagen = require('../models/imagen');
-const cloudinary = require('../utils/cloudinary.js');
+const objectStorage = require('../utils/objectStorage');
 const {
   limpiarTexto,
   textoBusqueda,
@@ -91,6 +91,7 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
   const tipo = limpiarTexto(req.body.tipo);
   const ubicacion = textoBusqueda(req.body.ubicacion, 300);
   const observacion = textoBusqueda(req.body.observacion, 1000);
+  let uploaded = null;
 
   try {
     if (!req.file || !tipo || !ubicacion) {
@@ -111,11 +112,6 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
       });
     }
 
-    const resultado = await cloudinary.uploader.upload(req.file.path, {
-      folder: `evidencias/${sesionId}`,
-      resource_type: 'image'
-    });
-
     const nombreOriginal = textoBusqueda(
       path.basename(req.file.originalname || ''),
       200
@@ -127,11 +123,37 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
       .replace(/[^a-z0-9_-]+/g, '_')
       .replace(/^_+|_+$/g, '')
       .slice(0, 120) || 'imagen';
+    const extension = MIME_A_EXTENSION[req.file.mimetype] || '.bin';
+    const key = objectStorage.createObjectKey(
+      `evidencias/${sesionId}`,
+      `${Date.now()}-${crypto.randomUUID()}-${nombreBase}${extension}`
+    );
+    const resultado = await objectStorage.uploadBuffer(
+      await fs.promises.readFile(req.file.path),
+      {
+        key,
+        contentType: req.file.mimetype,
+        resourceType: 'image',
+        cloudinaryOptions: {
+          folder: `evidencias/${sesionId}`
+        }
+      }
+    );
+    uploaded = resultado;
+    const urlParaCliente = await objectStorage.getSignedReadUrl({
+      storageProvider: resultado.storageProvider,
+      storageKey: resultado.storageKey,
+      publicId: resultado.publicId,
+      url: resultado.url
+    });
 
     const nuevaImagen = new Imagen({
       nombreOriginal: nombreBase,
       nombreArchivoOriginal: nombreOriginal,
-      url: resultado.secure_url,
+      url: resultado.url,
+      storageProvider: resultado.storageProvider,
+      storageKey: resultado.storageKey,
+      publicId: resultado.publicId,
       sesionId,
       tipo,
       ubicacion,
@@ -144,13 +166,24 @@ router.post('/subir', upload.single('imagen'), async (req, res) => {
 
     return res.status(201).json({
       mensaje: 'Imagen subida y registrada exitosamente',
-      url: resultado.secure_url,
+      url: urlParaCliente,
       sesionId,
       tipo,
       ubicacion
     });
   } catch (err) {
     limpiarArchivoLocal(req.file?.path);
+    if (uploaded) {
+      await objectStorage.deleteObject(uploaded, {
+        publicId: uploaded.publicId,
+        resourceType: 'image'
+      }).catch((cleanupError) => {
+        console.warn(
+          'No se pudo limpiar la imagen subida tras un error:',
+          cleanupError?.message || cleanupError
+        );
+      });
+    }
 
     console.error('Error al subir imagen:', err?.message || err);
 

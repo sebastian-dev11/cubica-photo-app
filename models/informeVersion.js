@@ -56,6 +56,16 @@ const pdfSchema = new Schema(
       trim: true,
       default: ''
     },
+    storageProvider: {
+      type: String,
+      enum: ['', 'cloudinary', 'r2'],
+      default: ''
+    },
+    storageKey: {
+      type: String,
+      trim: true,
+      default: ''
+    },
     publicId: {
       type: String,
       trim: true,
@@ -75,6 +85,16 @@ const pdfSchema = new Schema(
 const archivoSchema = new Schema(
   {
     url: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    storageProvider: {
+      type: String,
+      enum: ['', 'cloudinary', 'r2'],
+      default: ''
+    },
+    storageKey: {
       type: String,
       trim: true,
       default: ''

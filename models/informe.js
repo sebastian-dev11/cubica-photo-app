@@ -54,6 +54,16 @@ const archivoSchema = new mongoose.Schema(
       trim: true,
       default: ''
     },
+    storageProvider: {
+      type: String,
+      enum: ['', 'cloudinary', 'r2'],
+      default: ''
+    },
+    storageKey: {
+      type: String,
+      trim: true,
+      default: ''
+    },
     publicId: {
       type: String,
       trim: true,
@@ -143,6 +153,16 @@ const informeSchema = new mongoose.Schema(
     url: {
       type: String,
       required: true
+    },
+    storageProvider: {
+      type: String,
+      enum: ['', 'cloudinary', 'r2'],
+      default: ''
+    },
+    storageKey: {
+      type: String,
+      trim: true,
+      default: ''
     },
     publicId: {
       type: String,

@@ -12,6 +12,12 @@ const {
   escaparRegex,
   esSesionIdValido
 } = require('../utils/validaciones');
+const objectStorage = require('../utils/objectStorage');
+const {
+  construirNombreArchivoDescarga,
+  construirUrlVistaPrevia,
+  crearTokenVistaPrevia
+} = require('../utils/pdfPreview');
 
 function sanitizePagination(page, limit) {
   let p = parseInt(page, 10);
@@ -50,10 +56,32 @@ function esPropietario(informe, userId) {
   return Boolean(ownerId && userId && ownerId === userId);
 }
 
-function mapInforme(informe) {
+function mapInforme(informe, req) {
+  const shareUrl = computeShareUrl(informe);
+
+  if (objectStorage.getProvider(informe) === 'r2') {
+    const nombreArchivo = construirNombreArchivoDescarga(
+      String(informe.numeroIncidencia || ''),
+      String(informe.tiendaNombre || informe.tiendaId?.nombre || '')
+    );
+    const token = crearTokenVistaPrevia(
+      informe._id.toString(),
+      `${nombreArchivo}.pdf`
+    );
+    const previewUrl = construirUrlVistaPrevia(req, token);
+    const { storageKey, publicId, ...informePublico } = informe;
+
+    return {
+      ...informePublico,
+      url: previewUrl,
+      shareUrl: previewUrl,
+      previewUrl
+    };
+  }
+
   return {
     ...informe,
-    shareUrl: computeShareUrl(informe)
+    shareUrl
   };
 }
 
@@ -181,7 +209,7 @@ router.get('/', async (req, res) => {
       .limit(limit)
       .lean();
 
-    const data = informes.map(mapInforme);
+    const data = informes.map((informe) => mapInforme(informe, req));
 
     res.set('Cache-Control', 'no-store');
 
@@ -240,7 +268,7 @@ router.get('/utils/ultimo-por-sesion', async (req, res) => {
       });
     }
 
-    return res.json(mapInforme(inf));
+    return res.json(mapInforme(inf, req));
   } catch (err) {
     console.error('Error consultando último informe por sesión:', err);
 
@@ -341,7 +369,7 @@ router.get('/tienda/:tiendaId', async (req, res) => {
       .limit(limit)
       .lean();
 
-    const data = informes.map(mapInforme);
+    const data = informes.map((informe) => mapInforme(informe, req));
 
     res.set('Cache-Control', 'no-store');
 
@@ -369,7 +397,7 @@ router.get('/:id', async (req, res) => {
 
     res.set('Cache-Control', 'no-store');
 
-    return res.json(mapInforme(inf));
+    return res.json(mapInforme(inf, req));
   } catch (err) {
     console.error('Error consultando informe:', err);
 

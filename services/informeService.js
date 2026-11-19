@@ -5,7 +5,7 @@ const InformeVersion = require('../models/informeVersion');
 const Sesion = require('../models/sesion');
 const Tienda = require('../models/tienda');
 const UsuarioUnico = require('../models/UsuarioUnico');
-const cloudinary = require('../utils/cloudinary');
+const objectStorage = require('../utils/objectStorage');
 const { regenerarYSubirPdfInforme } = require('./pdfInformeService');
 
 function slugify(str) {
@@ -226,6 +226,8 @@ function normalizarArchivoVersion(item = {}) {
 
   return {
     url: limpiarTexto(plain.url),
+    storageProvider: limpiarTexto(plain.storageProvider),
+    storageKey: limpiarTexto(plain.storageKey),
     publicId: limpiarTexto(plain.publicId || plain.public_id),
     public_id: limpiarTexto(plain.public_id || plain.publicId),
     nombreOriginal: limpiarTexto(plain.nombreOriginal),
@@ -258,6 +260,8 @@ function crearSnapshotInforme(informe) {
     generatedBy: data.generatedBy || null,
     sesionId: data.sesionId || '',
     url: data.url || '',
+    storageProvider: data.storageProvider || '',
+    storageKey: data.storageKey || '',
     publicId: data.publicId || '',
     mimeType: data.mimeType || 'application/pdf',
     includesActa: Boolean(data.includesActa),
@@ -322,10 +326,14 @@ async function guardarVersionActual({
     sesionId: snapshot.sesionId,
     pdf: {
       url: snapshot.url,
+      storageProvider: snapshot.storageProvider,
+      storageKey: snapshot.storageKey,
       publicId: snapshot.publicId,
       mimeType: snapshot.mimeType
     },
     url: snapshot.url,
+    storageProvider: snapshot.storageProvider,
+    storageKey: snapshot.storageKey,
     publicId: snapshot.publicId,
     mimeType: snapshot.mimeType,
     includesActa: snapshot.includesActa,
@@ -403,6 +411,8 @@ async function intentarRegenerarPdfInforme({
 
   const pdfNuevo = {
     url: resultado.url,
+    storageProvider: resultado.storageProvider || '',
+    storageKey: resultado.storageKey || '',
     publicId: resultado.publicId,
     mimeType: resultado.mimeType || 'application/pdf',
     includesActa: Boolean(resultado.includesActa)
@@ -413,6 +423,8 @@ async function intentarRegenerarPdfInforme({
     'pdf',
     {
       url: informe.url,
+      storageProvider: informe.storageProvider,
+      storageKey: informe.storageKey,
       publicId: informe.publicId,
       mimeType: informe.mimeType,
       includesActa: informe.includesActa
@@ -483,63 +495,60 @@ async function guardarInforme({
   const sufijoUnico = crypto.randomBytes(4).toString('hex');
 
   const publicId = `${slugify(nombreArchivo)}_${hashContenido}_${sufijoUnico}`;
-
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        resource_type: 'raw',
-        folder: 'informes',
-        public_id: publicId,
-        overwrite,
-        format: 'pdf',
-        filename_override: `${nombreArchivo}.pdf`
-      },
-      async (error, result) => {
-        if (error) {
-          return reject(error);
-        }
-
-        try {
-          const informe = await Informe.create({
-            title,
-            generatedBy,
-            sesionId: sesionIdNormalizado,
-            url: result.secure_url,
-            publicId: result.public_id,
-            mimeType: 'application/pdf',
-            numeroIncidencia,
-            includesActa,
-            regional,
-            tiendaId: tiendaNormalizada.tiendaId,
-            tiendaNombre: tiendaNormalizada.tiendaNombre,
-            tiendaRegional: tiendaNormalizada.tiendaRegional,
-            tiendaDepartamento: tiendaNormalizada.tiendaDepartamento,
-            tiendaCiudad: tiendaNormalizada.tiendaCiudad,
-            geolocalizacion: geolocalizacionNormalizada,
-            versionActual: 1,
-            fuentesPersistentes: false
-          });
-
-          resolve(informe);
-        } catch (dbErr) {
-          try {
-            await cloudinary.uploader.destroy(result.public_id, {
-              resource_type: 'raw'
-            });
-          } catch (cleanupErr) {
-            console.warn(
-              'No se pudo limpiar asset en Cloudinary tras fallo de DB:',
-              cleanupErr?.message || cleanupErr
-            );
-          }
-
-          reject(dbErr);
-        }
-      }
-    );
-
-    uploadStream.end(buffer);
+  const storageKey = objectStorage.createObjectKey(
+    'informes',
+    `${publicId}.pdf`
+  );
+  const uploaded = await objectStorage.uploadBuffer(buffer, {
+    key: storageKey,
+    contentType: 'application/pdf',
+    resourceType: 'raw',
+    cloudinaryOptions: {
+      folder: 'informes',
+      public_id: publicId,
+      overwrite,
+      format: 'pdf',
+      filename_override: `${nombreArchivo}.pdf`
+    }
   });
+
+  try {
+    return await Informe.create({
+      title,
+      generatedBy,
+      sesionId: sesionIdNormalizado,
+      url: uploaded.url,
+      storageProvider: uploaded.storageProvider,
+      storageKey: uploaded.storageKey,
+      publicId: uploaded.publicId,
+      mimeType: 'application/pdf',
+      numeroIncidencia,
+      includesActa,
+      regional,
+      tiendaId: tiendaNormalizada.tiendaId,
+      tiendaNombre: tiendaNormalizada.tiendaNombre,
+      tiendaRegional: tiendaNormalizada.tiendaRegional,
+      tiendaDepartamento: tiendaNormalizada.tiendaDepartamento,
+      tiendaCiudad: tiendaNormalizada.tiendaCiudad,
+      geolocalizacion: geolocalizacionNormalizada,
+      versionActual: 1,
+      fuentesPersistentes: false
+    });
+  } catch (dbErr) {
+    try {
+      await objectStorage.deleteObject(uploaded, {
+        publicId: uploaded.publicId,
+        resourceType: 'raw'
+      });
+    } catch (cleanupErr) {
+      console.warn(
+        'No se pudo limpiar el PDF tras fallo al guardar en MongoDB:',
+        cleanupErr?.message || cleanupErr
+      );
+    }
+
+    throw dbErr;
+  }
 }
 
 async function resolverAuth({
@@ -633,34 +642,56 @@ async function eliminarInforme({
     isAdmin: isAdminEff
   });
 
-  let cloudResult = 'skipped';
+  const versiones = await InformeVersion.find({ informeId: id }).lean();
+  const archivos = [
+    {
+      storageProvider: informe.storageProvider,
+      storageKey: informe.storageKey,
+      url: informe.url,
+      publicId: informe.publicId
+    },
+    ...versiones.map((version) => ({
+      storageProvider:
+        version.pdf?.storageProvider || version.storageProvider || '',
+      storageKey:
+        version.pdf?.storageKey || version.storageKey || '',
+      url: version.pdf?.url || version.url || '',
+      publicId: version.pdf?.publicId || version.publicId || ''
+    }))
+  ];
 
-  if (informe.publicId) {
+  for (const archivo of archivos) {
+    if (!archivo.url && !archivo.storageKey && !archivo.publicId) continue;
+
+    let eliminado = false;
+
     try {
-      const resp = await cloudinary.uploader.destroy(
-        informe.publicId,
-        {
-          resource_type: 'raw',
-          invalidate: true
-        }
-      );
-
-      cloudResult = resp?.result || 'ok';
+      eliminado = await objectStorage.deleteObject(archivo, {
+        publicId: archivo.publicId,
+        resourceType: 'raw'
+      });
     } catch (e) {
       const err = new Error(
-        `Fallo al eliminar en Cloudinary: ${e?.message || e}`
+        `Fallo al eliminar un PDF del almacenamiento: ${e?.message || e}`
+      );
+      err.status = 502;
+      throw err;
+    }
+
+    if (!eliminado) {
+      const err = new Error(
+        'No se pudo eliminar uno de los PDFs; se conserva el registro del informe para reintentar.'
       );
       err.status = 502;
       throw err;
     }
   }
 
-  await Informe.deleteOne({
-    _id: id
-  });
+  await InformeVersion.deleteMany({ informeId: id });
+  await Informe.deleteOne({ _id: id });
 
   return {
-    cloudResult
+    filesDeleted: archivos.length
   };
 }
 
@@ -830,6 +861,8 @@ async function editarInforme({
 
     if (pdfRegenerado) {
       valoresNuevos.url = pdfRegenerado.url;
+      valoresNuevos.storageProvider = pdfRegenerado.storageProvider;
+      valoresNuevos.storageKey = pdfRegenerado.storageKey;
       valoresNuevos.publicId = pdfRegenerado.publicId;
       valoresNuevos.mimeType = pdfRegenerado.mimeType;
       valoresNuevos.includesActa = pdfRegenerado.includesActa;
@@ -978,7 +1011,7 @@ async function eliminarInformesBulk({
     if (r.status === 'fulfilled') {
       deleted.push({
         id: ids[i],
-        cloudResult: r.value.cloudResult
+        filesDeleted: r.value.filesDeleted
       });
     } else {
       failed.push({

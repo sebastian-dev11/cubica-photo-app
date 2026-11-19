@@ -1,5 +1,3 @@
-const axios = require('axios');
-const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const previewRouter = express.Router();
@@ -13,167 +11,27 @@ const Informe = require('../models/informe');
 const {
   actasEnMemoria,
   cargarActaEnMemoria,
+  guardarActaEnDb,
   eliminarActaEnDb
 } = require('./acta');
 const Tienda = require('../models/tienda');
 const { guardarInforme } = require('../services/informeService');
-const cloudinary = require('../utils/cloudinary');
+const objectStorage = require('../utils/objectStorage');
 const {
   esSesionIdValido,
   esUrlCloudinarySegura,
   limpiarTexto,
   textoBusqueda
 } = require('../utils/validaciones');
+const {
+  construirNombreArchivoDescarga,
+  construirUrlVistaPrevia,
+  crearTokenVistaPrevia,
+  verificarTokenVistaPrevia
+} = require('../utils/pdfPreview');
 
-const LOGO_CUBICA_URL = 'https://res.cloudinary.com/hg7dbayv/image/upload/v1793290504/LOGO_CUBICA.png';
-const LOGO_D1_URL = 'https://res.cloudinary.com/hg7dbayv/image/upload/v1793290508/D1_LOGO_NUEVO.jpg';
-
-const TTL_VISTA_PREVIA_MS = Math.min(
-  Math.max(
-    Number(process.env.PDF_PREVIEW_TTL_MS) || 24 * 60 * 60 * 1000,
-    60 * 1000
-  ),
-  7 * 24 * 60 * 60 * 1000
-);
-
-let avisoBasePublicaEmitido = false;
-let avisoSecretoPreviewCompartido = false;
-
-function construirNombreArchivoDescarga(numeroIncidencia, tiendaNombre) {
-  const incidencia =
-    typeof numeroIncidencia === 'string'
-      ? numeroIncidencia.replace(/\s+/g, ' ').trim()
-      : '';
-
-  const tienda =
-    typeof tiendaNombre === 'string'
-      ? tiendaNombre.replace(/\s+/g, ' ').trim()
-      : '';
-
-  return `INFORME TÉCNICO-${incidencia || 'SIN INCIDENCIA'}-${tienda || 'SIN TIENDA'}`
-    .toLocaleUpperCase('es-CO')
-    .replace(/[\/:*?"<>|]/g, '-')
-    .replace(/\s+/g, ' ')
-    .replace(/[. ]+$/g, '')
-    .trim();
-}
-
-function obtenerSecretoVistaPrevia() {
-  const secretoEspecifico = process.env.PDF_PREVIEW_SECRET;
-
-  if (secretoEspecifico) return secretoEspecifico;
-
-  const secretoCompartido = process.env.JWT_SECRET || process.env.TOKEN_SECRET || '';
-
-  if (secretoCompartido && !avisoSecretoPreviewCompartido) {
-    console.warn(
-      'PDF_PREVIEW_SECRET no configurado; se reutiliza un secreto existente para firmar vistas previas.'
-    );
-    avisoSecretoPreviewCompartido = true;
-  }
-
-  return secretoCompartido;
-}
-
-function crearTokenVistaPrevia(informeId, nombreArchivo) {
-  const secret = obtenerSecretoVistaPrevia();
-
-  if (!secret) {
-    throw new Error('Falta configurar la clave para firmar la vista previa del PDF');
-  }
-
-  const payload = Buffer.from(JSON.stringify({
-    id: String(informeId),
-    filename: nombreArchivo,
-    exp: Date.now() + TTL_VISTA_PREVIA_MS
-  })).toString('base64url');
-
-  const signature = crypto
-    .createHmac('sha256', secret)
-    .update(payload)
-    .digest('base64url');
-
-  return `${payload}.${signature}`;
-}
-
-function verificarTokenVistaPrevia(token) {
-  const partes = typeof token === 'string' ? token.split('.') : [];
-
-  if (partes.length !== 2) return null;
-
-  const [payloadCodificado, firmaRecibida] = partes;
-  const secret = obtenerSecretoVistaPrevia();
-
-  if (!secret) return null;
-
-  const firmaEsperada = crypto
-    .createHmac('sha256', secret)
-    .update(payloadCodificado)
-    .digest('base64url');
-
-  const recibida = Buffer.from(firmaRecibida);
-  const esperada = Buffer.from(firmaEsperada);
-
-  if (recibida.length !== esperada.length || !crypto.timingSafeEqual(recibida, esperada)) {
-    return null;
-  }
-
-  try {
-    const payload = JSON.parse(Buffer.from(payloadCodificado, 'base64url').toString('utf8'));
-
-    if (
-      typeof payload.id !== 'string' ||
-      typeof payload.filename !== 'string' ||
-      typeof payload.exp !== 'number' ||
-      payload.exp <= Date.now() ||
-      !payload.filename.toLowerCase().endsWith('.pdf')
-    ) {
-      return null;
-    }
-
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
-function normalizarUrlPdfCloudinary(url) {
-  if (!esUrlCloudinarySegura(url)) return '';
-
-  return url.replace(/\/raw\/upload\/fl_attachment:[^/]+\//i, '/raw/upload/');
-}
-
-function construirUrlVistaPrevia(req, token) {
-  const configurada = String(process.env.PUBLIC_BASE_URL || '')
-    .trim()
-    .replace(/\/+$/, '');
-
-  if (/^https?:\/\/[^/]+$/i.test(configurada)) {
-    return `${configurada}/pdf-preview/${token}`;
-  }
-
-  if (!avisoBasePublicaEmitido) {
-    console.warn(
-      'PUBLIC_BASE_URL no configurado; las URLs de vista previa se derivarán del Host de la petición.'
-    );
-    avisoBasePublicaEmitido = true;
-  }
-
-  const protocolo = String(req.get('x-forwarded-proto') || req.protocol)
-    .split(',')[0]
-    .trim()
-    .toLowerCase();
-  const host = String(req.get('host') || '').trim();
-
-  if (
-    !['http', 'https'].includes(protocolo) ||
-    !/^[a-z0-9.-]+(?::\d{1,5})?$/i.test(host)
-  ) {
-    throw new Error('No se pudo construir una URL pública segura para la vista previa');
-  }
-
-  return `${protocolo}://${host}/pdf-preview/${token}`;
-}
+const LOGO_CUBICA_PATH = path.join(__dirname, '../assets/logos/logo-cubica.png');
+const LOGO_D1_PATH = path.join(__dirname, '../assets/logos/logo-d1.jpg');
 
 previewRouter.get('/:token', async (req, res) => {
   const payload = verificarTokenVistaPrevia(req.params.token);
@@ -189,39 +47,13 @@ previewRouter.get('/:token', async (req, res) => {
       return res.status(404).send('No se encontró el informe solicitado.');
     }
 
-    let urlPdf = '';
-    const publicId = informe.publicId || informe.public_id || '';
-
-    if (publicId) {
-      try {
-        const recurso = await cloudinary.api.resource(publicId, {
-          resource_type: 'raw'
-        });
-        urlPdf = normalizarUrlPdfCloudinary(
-          recurso?.secure_url || recurso?.url || ''
-        );
-      } catch (cloudinaryError) {
-        console.warn(
-          'No se pudo localizar el PDF por publicId en Cloudinary:',
-          cloudinaryError?.message || cloudinaryError
-        );
-      }
-    }
-
-    if (!urlPdf) {
-      urlPdf = normalizarUrlPdfCloudinary(informe.url);
-    }
-
-    if (!urlPdf) {
-      return res.status(404).send('El informe no tiene un PDF disponible en Cloudinary.');
-    }
-
-    const respuesta = await axios.get(urlPdf, {
-      responseType: 'arraybuffer',
-      timeout: 30000,
-      maxContentLength: 100 * 1024 * 1024,
-      maxRedirects: 0
+    const pdfBuffer = await objectStorage.downloadBuffer(informe, {
+      maxBytes: 100 * 1024 * 1024
     });
+
+    if (pdfBuffer.slice(0, 4).toString('utf8') !== '%PDF') {
+      return res.status(404).send('El archivo del informe no es un PDF válido.');
+    }
 
     const nombreAscii = payload.filename
       .normalize('NFD')
@@ -237,63 +69,29 @@ previewRouter.get('/:token', async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store, max-age=0');
     res.setHeader('X-Content-Type-Options', 'nosniff');
 
-    return res.status(200).send(Buffer.from(respuesta.data));
+    return res.status(200).send(pdfBuffer);
   } catch (error) {
     console.error('Error cargando la vista previa del informe:', error?.message || error);
     return res.status(502).send('No fue posible cargar el PDF.');
   }
 });
 
-function isCloudinaryUrl(url) {
-  return esUrlCloudinarySegura(url);
-}
-
-function insertTransformInCloudinaryUrl(url, transformStr) {
+async function safeGetBuffer(file) {
   try {
-    if (!isCloudinaryUrl(url)) return url;
-
-    const uploadSegment = '/upload/';
-    const idx = url.indexOf(uploadSegment);
-
-    if (idx === -1) return url;
-        const afterUpload = url.slice(idx + uploadSegment.length);
-    const alreadyHasTransforms = !afterUpload.startsWith('v');
-
-    if (alreadyHasTransforms) return url;
-
-    const before = url.slice(0, idx + uploadSegment.length);
-    const after = url.slice(idx + uploadSegment.length);
-
-    return `${before}${transformStr}/${after}`;
-  } catch {
-    return url;
-  }
-}
-
-function buildTransformedUrl(url) {
-  return insertTransformInCloudinaryUrl(url, 'f_jpg,q_65,w_1400');
-}
-
-function buildLogoUrl(url) {
-  return insertTransformInCloudinaryUrl(url, 'f_png,q_auto,w_400');
-}
-
-async function safeGetBuffer(url) {
-  if (!esUrlCloudinarySegura(url)) {
-    console.warn('URL no permitida para descarga; se omitió el recurso.');
+    return await objectStorage.downloadBuffer(file, {
+      maxBytes: 100 * 1024 * 1024
+    });
+  } catch (err) {
+    console.warn('No se pudo descargar un recurso:', err?.message || err);
     return null;
   }
+}
 
+function leerLogo(filePath) {
   try {
-    const resp = await axios.get(url, {
-      responseType: 'arraybuffer',
-      timeout: 30000,
-      maxContentLength: 100 * 1024 * 1024,
-      maxRedirects: 0
-    });
-    return Buffer.from(resp.data);
-  } catch (err) {
-    console.warn('No se pudo descargar un recurso de Cloudinary:', err?.message || err);
+    return fs.readFileSync(filePath);
+  } catch (error) {
+    console.warn('No se pudo leer un logo local:', error?.message || error);
     return null;
   }
 }
@@ -321,7 +119,7 @@ function centerImageInBox(doc, imgBuffer, boxX, boxY, boxW, boxH) {
   };
 }
 
-function getPublicIdFromUrl(url) {
+function getPublicIdFromUrl(url, resourceType = 'image') {
   if (!esUrlCloudinarySegura(url)) return null;
 
   try {
@@ -343,7 +141,7 @@ function getPublicIdFromUrl(url) {
       restantes = restantes.filter(
         (s) =>
           !s.includes(',') &&
-          !/^(?:c_|w_|h_|q_|f_|e_|x_|y_|g_|r_|a_|b_|d_|t_|o_|l_|s_|p_|u_)/i.test(s)
+          !/^(?:c_|w_|h_|q_|f_|fl_|e_|x_|y_|g_|r_|a_|b_|d_|t_|o_|l_|s_|p_|u_)/i.test(s)
       );
     }
 
@@ -352,9 +150,11 @@ function getPublicIdFromUrl(url) {
     const ultimo = restantes[restantes.length - 1];
     const extension = path.extname(ultimo);
 
-    if (!extension) return null;
+    if (!extension) return restantes.join('/') || null;
 
-    restantes[restantes.length - 1] = ultimo.slice(0, -extension.length);
+    if (resourceType !== 'raw') {
+      restantes[restantes.length - 1] = ultimo.slice(0, -extension.length);
+    }
 
     return restantes.join('/') || null;
   } catch {
@@ -409,22 +209,31 @@ function cleanupTempsBySession(sesionId) {
   }
 }
 
-async function destroyCloudinary(publicId, resourceType) {
+async function deleteStoredFile(file, resourceType) {
   try {
-    if (!publicId) {
+    if (!file) {
       return {
         ok: false,
-        error: 'publicId vacío'
+        error: 'Referencia de archivo vacía'
       };
     }
 
-    const res = await cloudinary.uploader.destroy(publicId, {
-      resource_type: resourceType
+    const reference = typeof file === 'string'
+      ? { url: file }
+      : {
+          ...file,
+          publicId:
+            file.publicId ||
+            file.public_id ||
+            getPublicIdFromUrl(file.url, resourceType)
+        };
+    const deleted = await objectStorage.deleteObject(reference, {
+      publicId: reference.publicId || reference.public_id,
+      resourceType
     });
 
     return {
-      ok: true,
-      res
+      ok: deleted
     };
   } catch (e) {
     return {
@@ -729,27 +538,27 @@ async function renderEvidencePairs(
         layout.startY +
         i * layout.pairStepY;
 
-      const previaUrl =
-        isCloudinaryUrl(previa?.url)
-          ? buildTransformedUrl(previa.url)
-          : previa?.url;
+      const previaBuf = await objectStorage.getOptimizedImageBuffer(previa, {
+        width: 1200,
+        quality: 60
+      }).catch((error) => {
+        console.warn('No se pudo optimizar la evidencia previa:', error?.message || error);
+        return null;
+      });
 
-      const posteriorUrl =
-        isCloudinaryUrl(posterior?.url)
-          ? buildTransformedUrl(posterior.url)
-          : posterior?.url;
-
-      const previaBuf =
-        await safeGetBuffer(previaUrl);
-
-      const posteriorBuf =
-        await safeGetBuffer(posteriorUrl);
+      const posteriorBuf = await objectStorage.getOptimizedImageBuffer(posterior, {
+        width: 1200,
+        quality: 60
+      }).catch((error) => {
+        console.warn('No se pudo optimizar la evidencia posterior:', error?.message || error);
+        return null;
+      });
 
       if (
         !previaBuf ||
         !posteriorBuf
       ) {
-        continue;
+        throw new Error('No se pudo cargar una pareja completa de evidencias; se conserva la sesión para reintentar.');
       }
 
       const leftX =
@@ -917,42 +726,38 @@ router.post(
         actaPdf: false,
         actaImgsN: 0
       };
+      let todosEliminados = true;
 
       const imagenes =
         await Imagen
           .find({ sesionId })
           .lean();
 
+      const imagenesEliminadas = [];
+
       for (const img of imagenes) {
-        const pid =
-          getPublicIdFromUrl(
-            img?.url
+        const resultado = await deleteStoredFile(img, 'image');
+
+        if (resultado.ok) {
+          imagenesEliminadas.push(img._id);
+        } else {
+          todosEliminados = false;
+          console.warn(
+            'No se pudo borrar una evidencia de la sesión:',
+            img?.storageKey || img?.url,
+            resultado.error
           );
-
-        if (pid) {
-          const r =
-            await destroyCloudinary(
-              pid,
-              'image'
-            );
-
-          if (!r.ok) {
-            console.warn(
-              'No se pudo borrar evidencia en Cloudinary:',
-              pid,
-              r.error
-            );
-          }
         }
       }
 
-      if (imagenes.length > 0) {
+      if (imagenesEliminadas.length > 0) {
         await Imagen.deleteMany({
+          _id: { $in: imagenesEliminadas },
           sesionId
         });
 
         deleted.imagenesN =
-          imagenes.length;
+          imagenesEliminadas.length;
       }
 
       const store =
@@ -964,60 +769,60 @@ router.post(
       ) {
         if (
           store.acta &&
-          store.acta.public_id
+          (store.acta.public_id || store.acta.storageKey || store.acta.url)
         ) {
-          const r =
-            await destroyCloudinary(
-              store.acta.public_id,
-              'raw'
-            );
+          const r = await deleteStoredFile(store.acta, 'raw');
 
           if (!r.ok) {
+            todosEliminados = false;
             console.warn(
-              'No se pudo borrar acta en Cloudinary:',
-              store.acta.public_id,
+              'No se pudo borrar el PDF del acta:',
+              store.acta.storageKey || store.acta.public_id,
               r.error
             );
+          } else {
+            deleted.actaPdf = true;
+            store.acta = null;
           }
-
-          deleted.actaPdf = true;
         }
 
         if (
           Array.isArray(store.imagenes) &&
           store.imagenes.length > 0
         ) {
-          for (
-            const it of store.imagenes
-          ) {
-            if (it?.public_id) {
-              const r =
-                await destroyCloudinary(
-                  it.public_id,
-                  'image'
-                );
+          const restantes = [];
 
-              if (!r.ok) {
-                console.warn(
-                  'No se pudo borrar imagen de acta en Cloudinary:',
-                  it.public_id,
-                  r.error
-                );
-              }
+          for (const it of store.imagenes) {
+            const r = await deleteStoredFile(it, 'image');
 
+            if (r.ok) {
               deleted.actaImgsN += 1;
+            } else {
+              todosEliminados = false;
+              restantes.push(it);
+              console.warn(
+                'No se pudo borrar una imagen del acta:',
+                it?.storageKey || it?.public_id,
+                r.error
+              );
             }
           }
+
+          store.imagenes = restantes;
         }
 
-        delete actasEnMemoria[sesionId];
-        await eliminarActaEnDb(sesionId);
+        if (!store.acta && store.imagenes.length === 0) {
+          delete actasEnMemoria[sesionId];
+          await eliminarActaEnDb(sesionId);
+        } else {
+          await guardarActaEnDb(sesionId);
+        }
       }
 
       cleanupTempsBySession(sesionId);
 
       return res.status(200).json({
-        ok: true,
+        ok: todosEliminados,
         deleted
       });
     } catch (e) {
@@ -1074,33 +879,10 @@ router.get('/preview-link/:informeId', async (req, res) => {
       });
     }
 
-    const publicId = informe.publicId || informe.public_id || '';
-    let urlPdf = '';
-
-    if (publicId) {
-      try {
-        const recurso = await cloudinary.api.resource(publicId, {
-          resource_type: 'raw'
-        });
-        urlPdf = normalizarUrlPdfCloudinary(
-          recurso?.secure_url || recurso?.url || ''
-        );
-      } catch (cloudinaryError) {
-        console.warn(
-          'No se pudo localizar el PDF por publicId en Cloudinary:',
-          cloudinaryError?.message || cloudinaryError
-        );
-      }
-    }
-
-    if (!urlPdf) {
-      urlPdf = normalizarUrlPdfCloudinary(informe.url);
-    }
-
-    if (!urlPdf) {
+    if (!await objectStorage.objectExists(informe)) {
       return res.status(404).json({
         ok: false,
-                error: 'El informe no tiene una URL ni un recurso PDF disponible en Cloudinary'
+        error: 'No se encontró el PDF del informe en el almacenamiento'
       });
     }
 
@@ -1306,15 +1088,15 @@ router.get(
       }
     };
 
-    const destroyCloudinaryWithRetry = async (
-      publicId,
+    const deleteStoredWithRetry = async (
+      file,
       resourceType,
       maxAttempts = 3
     ) => {
-      if (!publicId) {
+      if (!file) {
         return {
           ok: false,
-          reason: 'publicId vacío'
+          reason: 'Referencia de archivo vacía'
         };
       }
 
@@ -1326,34 +1108,18 @@ router.get(
         attempt++
       ) {
         try {
-          const result =
-            await cloudinary.uploader.destroy(
-              publicId,
-              {
-                resource_type:
-                  resourceType,
-                invalidate: true
-              }
-            );
+          const result = await deleteStoredFile(file, resourceType);
 
-          if (
-            result?.result === 'ok' ||
-            result?.result === 'not found'
-          ) {
+          if (result.ok) {
             return {
               ok: true,
-              result:
-                result?.result ||
-                'ok'
+              result: 'ok'
             };
           }
 
           lastError =
             new Error(
-              `Cloudinary respondió: ${
-                result?.result ||
-                'resultado desconocido'
-              }`
+              result?.error || result?.reason || 'No se pudo borrar el archivo'
             );
         } catch (err) {
           lastError = err;
@@ -1382,23 +1148,28 @@ router.get(
 
     const cleanupSessionAssetsAsync = async ({
       imagenes = [],
-      actaPublicId = null,
-      actaImgsPublicIds = []
+      actaFile = null,
+      actaImages = []
     }) => {
       const imageResults = [];
 
       try {
         for (const img of imagenes) {
-          const publicId =
-            img?.public_id ||
-            img?.publicId ||
-            getPublicIdFromUrl(
-              img?.url
-            );
+          const reference = {
+            ...img.toObject?.() || img,
+            publicId:
+              img?.publicId ||
+              img?.public_id ||
+              getPublicIdFromUrl(img?.url)
+          };
 
-          if (!publicId) {
+          if (
+            !reference.storageKey &&
+            !reference.url &&
+            !reference.publicId
+          ) {
             console.warn(
-              'No se encontró public_id para eliminar evidencia:',
+              'No se encontró referencia para eliminar evidencia:',
               img?._id?.toString() ||
               img?.url ||
               'imagen desconocida'
@@ -1408,22 +1179,18 @@ router.get(
               imageId:
                 img?._id?.toString() ||
                 null,
-              publicId: null,
+              storageKey: null,
               ok: false
             });
 
             continue;
           }
 
-          const result =
-            await destroyCloudinaryWithRetry(
-              publicId,
-              'image'
-            );
+          const result = await deleteStoredWithRetry(reference, 'image');
 
           if (!result.ok) {
             console.warn(
-              `No se pudo eliminar ${publicId} de Cloudinary:`,
+              `No se pudo eliminar la evidencia ${reference.storageKey || reference.publicId || reference.url}:`,
               result.error ||
               result.reason
             );
@@ -1433,63 +1200,79 @@ router.get(
             imageId:
               img?._id?.toString() ||
               null,
-            publicId,
+            referenceKey:
+              reference.storageKey ||
+              reference.publicId ||
+              reference.url ||
+              null,
             ok: result.ok
           });
         }
 
-        let actaDeleted = true;
+        let actaDeleted = !actaFile;
 
-        if (actaPublicId) {
-          const result =
-            await destroyCloudinaryWithRetry(
-              actaPublicId,
-              'raw'
-            );
+        if (actaFile) {
+          const reference = {
+            ...actaFile,
+            publicId:
+              actaFile.publicId ||
+              actaFile.public_id ||
+              getPublicIdFromUrl(actaFile.url, 'raw')
+          };
+          const result = await deleteStoredWithRetry(reference, 'raw');
 
           actaDeleted =
             result.ok;
 
           if (!result.ok) {
             console.warn(
-              `No se pudo eliminar el acta ${actaPublicId} de Cloudinary:`,
+              `No se pudo eliminar el acta ${reference.storageKey || reference.publicId || reference.url}:`,
               result.error ||
               result.reason
-                          );
+            );
           }
         }
 
         const actaImageResults = [];
 
-        for (
-          const publicId of
-          actaImgsPublicIds
-        ) {
-          if (!publicId) {
+        for (const image of actaImages) {
+          const reference = {
+            ...image,
+            publicId:
+              image?.publicId ||
+              image?.public_id ||
+              getPublicIdFromUrl(image?.url)
+          };
+
+          if (
+            !reference.storageKey &&
+            !reference.url &&
+            !reference.publicId
+          ) {
             actaImageResults.push({
-              publicId: null,
+              storageKey: null,
               ok: false
             });
 
             continue;
           }
 
-          const result =
-            await destroyCloudinaryWithRetry(
-              publicId,
-              'image'
-            );
+          const result = await deleteStoredWithRetry(reference, 'image');
 
           if (!result.ok) {
             console.warn(
-              `No se pudo eliminar imagen de acta ${publicId} de Cloudinary:`,
+              `No se pudo eliminar imagen de acta ${reference.storageKey || reference.publicId || reference.url}:`,
               result.error ||
               result.reason
             );
           }
 
           actaImageResults.push({
-            publicId,
+            referenceKey:
+              reference.storageKey ||
+              reference.publicId ||
+              reference.url ||
+              null,
             ok: result.ok
           });
         }
@@ -1518,7 +1301,7 @@ router.get(
                 item.imageId
             );
 
-        // Se eliminan solo los registros cuyo asset fue borrado en Cloudinary.
+        // Se eliminan solo los registros cuyo asset fue borrado.
         // Un deleteMany por sesión borraría imágenes subidas después de la
         // consulta inicial, dejando sus archivos huérfanos en la nube.
         if (successfulImageIds.length > 0) {
@@ -1534,7 +1317,7 @@ router.get(
           failedImageIds.length > 0
         ) {
           console.warn(
-            `La sesión ${sesionId} conserva ${failedImageIds.length} registro(s) de evidencia porque no se pudieron eliminar correctamente de Cloudinary.`
+            `La sesión ${sesionId} conserva ${failedImageIds.length} registro(s) de evidencia porque no se pudieron eliminar correctamente del almacenamiento.`
           );
         }
 
@@ -1544,17 +1327,27 @@ router.get(
               item.ok
           );
 
-        if (
-          actaDeleted &&
-          allActaImagesDeleted
-        ) {
-          delete actasEnMemoria[
-            sesionId
-          ];
-          await eliminarActaEnDb(sesionId);
-        } else {
+        const store = actasEnMemoria[sesionId];
+        if (store) {
+          if (actaDeleted && actaFile) store.acta = null;
+          store.imagenes = store.imagenes.filter((image) =>
+            actaImageResults.some(
+              (result) =>
+                !result.ok &&
+                result.referenceKey ===
+                  (image.storageKey || image.public_id || image.publicId || image.url)
+            )
+          );
+
+          if (!store.acta && store.imagenes.length === 0) {
+            delete actasEnMemoria[sesionId];
+            await eliminarActaEnDb(sesionId);
+          } else {
+            await guardarActaEnDb(sesionId);
+          }
+        } else if (!actaDeleted || !allActaImagesDeleted) {
           console.warn(
-            `Se conserva temporalmente la información del acta de la sesión ${sesionId} porque algunos archivos no pudieron eliminarse de Cloudinary.`
+            `Se conserva temporalmente la información del acta de la sesión ${sesionId}; algunos archivos no se pudieron eliminar.`
           );
         }
 
@@ -1577,7 +1370,7 @@ router.get(
           `Imágenes de acta eliminadas: ` +
           `${actaImageResults.length - failedActaImages}/${actaImageResults.length}. ` +
           `Acta PDF eliminada: ` +
-          `${actaPublicId ? actaDeleted : true}.`
+          `${actaFile ? actaDeleted : true}.`
         );
 
         return {
@@ -1633,13 +1426,16 @@ router.get(
           resolve,
           reject
         ) => {
+          let doc;
+          let stream;
+
           try {
-            const doc =
+            doc =
               new PDFDocument({
                 margin: 50
               });
 
-            const stream =
+            stream =
               fs.createWriteStream(
                 pdfImagenesPath
               );
@@ -1657,12 +1453,7 @@ router.get(
                 }
               );
 
-            const logoCubicaBuf =
-              await safeGetBuffer(
-                buildLogoUrl(
-                  LOGO_CUBICA_URL
-                )
-              );
+            const logoCubicaBuf = leerLogo(LOGO_CUBICA_PATH);
 
             if (logoCubicaBuf) {
               doc.image(
@@ -1675,12 +1466,7 @@ router.get(
               );
             }
 
-            const logoD1Buf =
-              await safeGetBuffer(
-                buildLogoUrl(
-                  LOGO_D1_URL
-                )
-              );
+            const logoD1Buf = leerLogo(LOGO_D1_PATH);
 
             if (logoD1Buf) {
               doc.image(
@@ -1797,6 +1583,12 @@ router.get(
                   img.tipo === 'posterior'
               );
 
+            if (previas.length === 0 || posteriores.length === 0) {
+              throw new Error(
+                'La sesión debe incluir al menos una evidencia previa y una posterior para generar el informe.'
+              );
+            }
+
             const pares = [];
 
             const minLength =
@@ -1836,6 +1628,10 @@ router.get(
               reject
             );
           } catch (err) {
+            try {
+              doc?.end();
+            } catch {}
+            stream?.destroy();
             reject(err);
           }
         }
@@ -1846,35 +1642,26 @@ router.get(
       await cargarActaEnMemoria(sesionId);
 
       const store = actasEnMemoria[sesionId];
-      const actaUrl =
-        store?.acta?.url ||
-        store?.url ||
-        null;
-
-      const actaPublicId =
-        store?.acta?.public_id ||
-        store?.public_id ||
-        null;
+      const actaFile = store?.acta || (
+        store?.url
+          ? {
+              url: store.url,
+              public_id: store.public_id || '',
+              storageProvider: store.storageProvider || '',
+              storageKey: store.storageKey || ''
+            }
+          : null
+      );
 
       const actaImgsArray =
         Array.isArray(store?.imagenes)
           ? store.imagenes
           : [];
 
-      const actaImgsPublicIds =
-        actaImgsArray
-          .map(
-            (item) =>
-              item?.public_id ||
-              item?.publicId ||
-              null
-          )
-          .filter(Boolean);
-
       let hadActaPdf = false;
       let hadActaImgs = false;
 
-      if (actaUrl) {
+      if (actaFile) {
         const actaPath =
           path.join(
             tempDir,
@@ -1882,8 +1669,7 @@ router.get(
           );
 
         try {
-          const actaBuf =
-            await safeGetBuffer(actaUrl);
+          const actaBuf = await safeGetBuffer(actaFile);
 
           if (
             actaBuf &&
@@ -1899,11 +1685,11 @@ router.get(
             await merger.add(
               actaPath
             );
-                        hadActaPdf = true;
+            hadActaPdf = true;
           } else {
-            console.warn(
-              `El acta para ${sesionId} no es un PDF válido o no se pudo descargar`
-                          );
+            throw new Error(
+              `No se pudo descargar un PDF válido del acta de la sesión ${sesionId}; se conservan los archivos para reintentar.`
+            );
           }
         } finally {
           if (
@@ -1934,14 +1720,17 @@ router.get(
             resolve,
             reject
           ) => {
+            let doc;
+            let stream;
+
             try {
-              const doc =
+              doc =
                 new PDFDocument({
                   autoFirstPage: false,
                   margin: 40
                 });
 
-              const stream =
+              stream =
                 fs.createWriteStream(
                   actaImgsPath
                 );
@@ -1951,22 +1740,21 @@ router.get(
               for (
                 const it of actaImgsArray
               ) {
-                const imgUrl =
-                  isCloudinaryUrl(
-                    it?.url
-                  )
-                    ? buildTransformedUrl(
-                        it.url
-                      )
-                    : it?.url;
-
-                const imgBuf =
-                  await safeGetBuffer(
-                    imgUrl
+                const imgBuf = await objectStorage.getOptimizedImageBuffer(it, {
+                  width: 1600,
+                  quality: 75
+                }).catch((error) => {
+                  console.warn(
+                    'No se pudo optimizar una página del acta:',
+                    error?.message || error
                   );
+                  return null;
+                });
 
                 if (!imgBuf) {
-                  continue;
+                  throw new Error(
+                    `No se pudo cargar una página del acta de la sesión ${sesionId}; se conservan los archivos para reintentar.`
+                  );
                 }
 
                 doc.addPage();
@@ -2009,6 +1797,10 @@ router.get(
                 reject
               );
             } catch (err) {
+              try {
+                doc.end();
+              } catch {}
+              stream.destroy();
               reject(err);
             }
           }
@@ -2082,8 +1874,8 @@ router.get(
         try {
           await cleanupSessionAssetsAsync({
             imagenes,
-            actaPublicId,
-            actaImgsPublicIds
+            actaFile,
+            actaImages: actaImgsArray
           });
         } catch (cleanupError) {
           console.warn(
@@ -2096,20 +1888,10 @@ router.get(
       if (wantsJson) {
         cleanupTemps();
 
-        const cloudUrlOriginal =
-          uploadMeta?.url ||
-          uploadMeta?.secure_url ||
-          uploadMeta?.cloudinary?.secure_url ||
-          uploadMeta?.informe?.url ||
-          null;
-
-        const cloudUrl = normalizarUrlPdfCloudinary(cloudUrlOriginal);
-
-        if (!cloudUrl) {
+        if (!uploadMeta?.url) {
           return res.status(500).json({
             ok: false,
-            error:
-              'No se obtuvo URL del informe en Cloudinary'
+            error: 'No se guardó correctamente el archivo del informe'
           });
         }
 
@@ -2117,7 +1899,7 @@ router.get(
           numeroIncidencia,
           tiendaSeleccionada?.nombre
         );
-                const informeId = uploadMeta?._id?.toString() || null;
+        const informeId = uploadMeta?._id?.toString() || null;
 
         const tokenVistaPrevia = informeId
           ? crearTokenVistaPrevia(informeId, `${nombreArchivo}.pdf`)
@@ -2126,17 +1908,20 @@ router.get(
         const previewUrl = tokenVistaPrevia
           ? construirUrlVistaPrevia(req, tokenVistaPrevia)
           : null;
+        const urlRespuesta = objectStorage.getProvider(uploadMeta) === 'r2'
+          ? previewUrl
+          : uploadMeta.url;
 
         return res.status(201).json({
           ok: true,
           id: informeId,
-          url:
-            cloudUrl,
+          url: urlRespuesta,
           previewUrl,
           filename: `${nombreArchivo}.pdf`,
           publicId:
-            uploadMeta?.publicId ||
-            null,
+            objectStorage.getProvider(uploadMeta) === 'r2'
+              ? null
+              : uploadMeta?.publicId || null,
           includesActa:
             hadActaPdf ||
             hadActaImgs,

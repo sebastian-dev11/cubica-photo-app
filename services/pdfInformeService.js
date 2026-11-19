@@ -1,51 +1,12 @@
-const axios = require('axios');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 const PDFMerger = require('pdf-merger-js');
 const crypto = require('crypto');
-const cloudinary = require('../utils/cloudinary');
-const {
-  esUrlCloudinarySegura
-} = require('../utils/validaciones');
+const objectStorage = require('../utils/objectStorage');
 
-const LOGO_CUBICA_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1773871245/LOGO_CUBICA_NUEVO_v3rsq5.jpg';
-const LOGO_D1_URL = 'https://res.cloudinary.com/drygjoxaq/image/upload/v1773875275/D1_LOGO_NUEVO_kj1bdh.jpg';
-
-function isCloudinaryUrl(url) {
-  return esUrlCloudinarySegura(url);
-}
-
-function insertTransformInCloudinaryUrl(url, transformStr) {
-  try {
-    if (!isCloudinaryUrl(url)) return url;
-
-    const uploadSegment = '/upload/';
-    const idx = url.indexOf(uploadSegment);
-
-    if (idx === -1) return url;
-
-    const afterUpload = url.slice(idx + uploadSegment.length);
-    const alreadyHasTransforms = !afterUpload.startsWith('v');
-
-    if (alreadyHasTransforms) return url;
-
-    const before = url.slice(0, idx + uploadSegment.length);
-    const after = url.slice(idx + uploadSegment.length);
-
-    return `${before}${transformStr}/${after}`;
-  } catch {
-    return url;
-  }
-}
-
-function buildTransformedUrl(url) {
-  return insertTransformInCloudinaryUrl(url, 'f_jpg,q_75,w_1800');
-}
-
-function buildLogoUrl(url) {
-  return insertTransformInCloudinaryUrl(url, 'f_png,q_auto,w_400');
-}
+const LOGO_CUBICA_PATH = path.join(__dirname, '../assets/logos/logo-cubica-informe.jpg');
+const LOGO_D1_PATH = path.join(__dirname, '../assets/logos/logo-d1-informe.jpg');
 
 function slugify(str) {
   return String(str || '')
@@ -87,22 +48,22 @@ function toPlain(value) {
   return typeof value.toObject === 'function' ? value.toObject({ depopulate: true }) : value;
 }
 
-async function safeGetBuffer(url) {
-  if (!esUrlCloudinarySegura(url)) {
-    console.warn('URL no permitida para descarga; se omitió el recurso.');
+async function safeGetBuffer(file) {
+  try {
+    return await objectStorage.downloadBuffer(file, {
+      maxBytes: 100 * 1024 * 1024
+    });
+  } catch (err) {
+    console.warn('No se pudo descargar un recurso:', err?.message || err);
     return null;
   }
+}
 
+function leerLogo(filePath) {
   try {
-    const resp = await axios.get(url, {
-      responseType: 'arraybuffer',
-      timeout: 30000,
-      maxContentLength: 100 * 1024 * 1024,
-      maxRedirects: 0
-    });
-    return Buffer.from(resp.data);
-  } catch (err) {
-    console.warn('No se pudo descargar un recurso de Cloudinary:', err?.message || err);
+    return fs.readFileSync(filePath);
+  } catch (error) {
+    console.warn('No se pudo leer un logo local:', error?.message || error);
     return null;
   }
 }
@@ -263,14 +224,19 @@ async function renderEvidencePairs(doc, pares, firstPageTopY) {
       const { previa, posterior } = pagePairs[i];
       const y = layout.startY + i * layout.pairStepY;
 
-      const previaUrl = isCloudinaryUrl(previa?.url) ? buildTransformedUrl(previa.url) : previa?.url;
-      const posteriorUrl = isCloudinaryUrl(posterior?.url) ? buildTransformedUrl(posterior.url) : posterior?.url;
-
-      const previaBuf = await safeGetBuffer(previaUrl);
-      const posteriorBuf = await safeGetBuffer(posteriorUrl);
+      const previaBuf = await objectStorage.getOptimizedImageBuffer(previa, {
+        width: 1200,
+        quality: 60
+      }).catch(() => null);
+      const posteriorBuf = await objectStorage.getOptimizedImageBuffer(posterior, {
+        width: 1200,
+        quality: 60
+      }).catch(() => null);
 
       if (!previaBuf || !posteriorBuf) {
-        continue;
+        throw new Error(
+          'No se pudieron cargar todas las evidencias originales para regenerar el informe.'
+        );
       }
 
       const leftX = layout.startX;
@@ -405,13 +371,13 @@ async function escribirPdfEvidencias({
         timeZone: 'America/Bogota'
       });
 
-      const logoCubicaBuf = await safeGetBuffer(buildLogoUrl(LOGO_CUBICA_URL));
+      const logoCubicaBuf = leerLogo(LOGO_CUBICA_PATH);
 
       if (logoCubicaBuf) {
         doc.image(logoCubicaBuf, doc.page.width - 150, 40, { width: 120 });
       }
 
-      const logoD1Buf = await safeGetBuffer(buildLogoUrl(LOGO_D1_URL));
+      const logoD1Buf = leerLogo(LOGO_D1_PATH);
 
       if (logoD1Buf) {
         doc.image(logoD1Buf, 50, 40, { width: 100 });
@@ -444,6 +410,12 @@ async function escribirPdfEvidencias({
       const firstPageTopY = doc.y;
       const pares = crearParesEvidencia(fuentes.evidenciasPrevias, fuentes.evidenciasPosteriores);
 
+      if (pares.length === 0) {
+        throw new Error(
+          'No hay una pareja completa de evidencias para regenerar el informe.'
+        );
+      }
+
       await renderEvidencePairs(doc, pares, firstPageTopY);
 
       doc.end();
@@ -469,10 +441,10 @@ async function agregarActaPdf({
   const actaPath = path.join(tempDir, `regenerar-acta-${token}.pdf`);
 
   try {
-    const actaBuf = await safeGetBuffer(acta.url);
+    const actaBuf = await safeGetBuffer(acta);
 
     if (!esPdfBuffer(actaBuf)) {
-      return false;
+      throw new Error('No se pudo recuperar el acta PDF original para regenerar el informe.');
     }
 
     fs.writeFileSync(actaPath, actaBuf);
@@ -506,10 +478,16 @@ async function crearPdfActaImagenes({
       doc.pipe(stream);
 
       for (const it of actaImagenes) {
-        const imgUrl = isCloudinaryUrl(it?.url) ? buildTransformedUrl(it.url) : it?.url;
-        const imgBuf = await safeGetBuffer(imgUrl);
+        const imgBuf = await objectStorage.getOptimizedImageBuffer(it, {
+          width: 1600,
+          quality: 75
+        }).catch(() => null);
 
-        if (!imgBuf) continue;
+        if (!imgBuf) {
+          throw new Error(
+            'No se pudo cargar una página del acta original para regenerar el informe.'
+          );
+        }
 
         doc.addPage();
 
@@ -616,7 +594,7 @@ async function generarPdfInformeBufferDesdeFuentes({
   }
 }
 
-function subirBufferPdfCloudinary({
+async function subirBufferPdfCloudinary({
   buffer,
   title,
   informeId,
@@ -634,28 +612,18 @@ function subirBufferPdfCloudinary({
   const hash8 = crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 8);
   const baseId = slugify(`${title || 'informe_tecnico'}_${informeId || 'sin_id'}_v${versionActual || 1}`);
   const publicId = `${baseId}_${hash8}.pdf`;
+  const key = objectStorage.createObjectKey('informes', publicId);
 
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        resource_type: 'raw',
-        folder: 'informes',
-        public_id: publicId,
-        overwrite,
-        format: 'pdf'
-      },
-      (error, result) => {
-        if (error) return reject(error);
-
-        return resolve({
-          url: result.secure_url,
-          publicId: result.public_id,
-          mimeType: 'application/pdf'
-        });
-      }
-    );
-
-    uploadStream.end(buffer);
+  return objectStorage.uploadBuffer(buffer, {
+    key,
+    contentType: 'application/pdf',
+    resourceType: 'raw',
+    cloudinaryOptions: {
+      folder: 'informes',
+      public_id: publicId,
+      overwrite,
+      format: 'pdf'
+    }
   });
 }
 

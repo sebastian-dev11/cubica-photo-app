@@ -2,6 +2,9 @@
   "name": "cubica-photo-app",
   "version": "1.0.0",
   "main": "app.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node app.js"
   },
@@ -10,6 +13,8 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1171.0",
+    "@aws-sdk/s3-request-presigner": "^3.1171.0",
     "axios": "^1.11.0",
     "bcryptjs": "^3.0.2",
     "cloudinary": "^2.7.0",
@@ -22,7 +27,6 @@
     "multer": "^2.0.2",
     "pdf-merger-js": "^4.3.1",
     "pdfkit": "^0.17.1",
-    "sharp": "^0.35.2",
-    "streamifier": "^0.1.1"
+    "sharp": "^0.35.2"
   }
 }

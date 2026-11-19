@@ -1095,7 +1095,7 @@ async function procesarImagenActa(buffer, opts = {}) {
         await crearBase(buffer).clone().metadata()
       );
     } catch {
-      // Se sube igual; Cloudinary resolverá las dimensiones reales.
+      // Se conserva el archivo original; el adaptador de almacenamiento lo guardará.
     }
 
     return {

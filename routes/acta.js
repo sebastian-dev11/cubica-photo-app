@@ -1,10 +1,9 @@
 const express = require('express');
 const multer = require('multer');
-const axios = require('axios');
 const PDFDocument = require('pdfkit');
 const sharp = require('sharp');
-const cloudinary = require('../utils/cloudinary');
-const streamifier = require('streamifier');
+const crypto = require('crypto');
+const objectStorage = require('../utils/objectStorage');
 const ActaDocumento = require('../models/actaDocumento');
 const {
   procesarImagenActaSeguro,
@@ -16,8 +15,7 @@ const {
 const {
   limpiarTexto,
   textoBusqueda,
-  esSesionIdValido,
-  esUrlCloudinarySegura
+  esSesionIdValido
 } = require('../utils/validaciones');
 
 const router = express.Router();
@@ -98,29 +96,14 @@ function validarSesionPermitida(req, sesionId) {
   }
 }
 
-function uploadBufferToCloudinary(buffer, options = {}) {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(options, (err, res) => {
-      if (err) return reject(err);
-      return resolve(res);
-    });
-
-    streamifier.createReadStream(buffer).pipe(stream);
-  });
-}
-
-async function eliminarCloudinary(publicId, resourceType) {
-  if (!publicId) return false;
-
+async function eliminarArchivo(file, resourceType) {
   try {
-    await cloudinary.uploader.destroy(publicId, {
-      resource_type: resourceType,
-      invalidate: true
+    return await objectStorage.deleteObject(file, {
+      publicId: file?.public_id || file?.publicId,
+      resourceType
     });
-
-    return true;
   } catch (error) {
-    console.warn('No se pudo eliminar un recurso de Cloudinary:', error?.message || error);
+    console.warn('No se pudo eliminar un archivo almacenado:', error?.message || error);
     return false;
   }
 }
@@ -137,6 +120,8 @@ function normalizarImagen(img, indice) {
   return {
     url: img.url,
     public_id: img.public_id,
+    storageProvider: img.storageProvider || '',
+    storageKey: img.storageKey || '',
     nombre: textoBusqueda(img.nombre, 200),
     width: Number.isFinite(Number(img.width)) ? Number(img.width) : null,
     height: Number.isFinite(Number(img.height)) ? Number(img.height) : null,
@@ -380,14 +365,24 @@ async function subirImagenActa(file, sesionId) {
     mimetype: file.mimetype
   });
 
-  const subida = await uploadBufferToCloudinary(resultado.buffer, {
-    folder: `actas/${sesionId}/imagenes`,
-    resource_type: 'image'
+  const key = objectStorage.createObjectKey(
+    `actas/${sesionId}/imagenes`,
+    `${Date.now()}-${crypto.randomUUID()}.${resultado.extension || 'jpg'}`
+  );
+  const subida = await objectStorage.uploadBuffer(resultado.buffer, {
+    key,
+    contentType: resultado.mimetype || 'image/jpeg',
+    resourceType: 'image',
+    cloudinaryOptions: {
+      folder: `actas/${sesionId}/imagenes`
+    }
   });
 
   return {
-    url: subida.secure_url,
-    public_id: subida.public_id,
+    url: subida.url,
+    public_id: subida.publicId,
+    storageProvider: subida.storageProvider,
+    storageKey: subida.storageKey,
     nombre: textoBusqueda(file.originalname, 200),
     width: resultado.width || subida.width || null,
     height: resultado.height || subida.height || null,
@@ -401,34 +396,33 @@ async function subirImagenActa(file, sesionId) {
   };
 }
 
-function respuestaStore(store, extra = {}) {
+async function respuestaStore(store, extra = {}) {
   const imagenes = store?.imagenes || [];
+  const acta = store?.acta
+    ? {
+        ...store.acta,
+        url: await objectStorage.getSignedReadUrl(store.acta).catch(() => '')
+      }
+    : null;
+  const imagenesFirmadas = await Promise.all(imagenes.map(async (imagen) => ({
+    ...imagen,
+    url: await objectStorage.getSignedReadUrl(imagen).catch(() => '')
+  })));
 
   return {
     ok: true,
     sesionId: store?.sesionId || null,
-    acta: store?.acta || null,
-    imagenes,
-    paginas: imagenes.length,
-    escaneadas: imagenes.filter((imagen) => imagen.escaneada).length,
+    acta,
+    imagenes: imagenesFirmadas,
+    paginas: imagenesFirmadas.length,
+    escaneadas: imagenesFirmadas.filter((imagen) => imagen.escaneada).length,
     pdfPath: store?.sesionId ? `/acta/${store.sesionId}/pdf` : null,
     ...extra
   };
 }
 
-async function descargarBuffer(url) {
-  if (!esUrlCloudinarySegura(url)) {
-    throw new Error('URL de imagen no permitida');
-  }
-
-  const respuesta = await axios.get(url, {
-    responseType: 'arraybuffer',
-    timeout: 30000,
-    maxContentLength: 50 * 1024 * 1024,
-    maxRedirects: 0
-  });
-
-  return Buffer.from(respuesta.data);
+async function descargarBuffer(file) {
+  return objectStorage.downloadBuffer(file, { maxBytes: 50 * 1024 * 1024 });
 }
 
 router.post('/detectar', uploadImagen, async (req, res) => {
@@ -548,6 +542,12 @@ router.post('/procesar', uploadImagen, async (req, res) => {
 });
 
 router.post('/subir', uploadActa, async (req, res) => {
+  const archivosSubidos = [];
+  const imagenesNuevas = [];
+  let store = null;
+  let actaAnterior = null;
+  let actaSubida = null;
+
   try {
     const sesionId = limpiarTexto(req.body?.sesionId || req.auth?.sesionId || '');
 
@@ -588,56 +588,93 @@ router.post('/subir', uploadActa, async (req, res) => {
       });
     }
 
-    const store = await obtenerStore(sesionId, req.auth?.userId);
-
-    let actaSubida = null;
+    store = await obtenerStore(sesionId, req.auth?.userId);
 
     if (pdfFile) {
-      const pdfResult = await uploadBufferToCloudinary(pdfFile.buffer, {
-        folder: `actas/${sesionId}`,
-        resource_type: 'raw'
+      const key = objectStorage.createObjectKey(
+        `actas/${sesionId}`,
+        `${Date.now()}-${crypto.randomUUID()}.pdf`
+      );
+      const pdfResult = await objectStorage.uploadBuffer(pdfFile.buffer, {
+        key,
+        contentType: 'application/pdf',
+        resourceType: 'raw',
+        cloudinaryOptions: {
+          folder: `actas/${sesionId}`
+        }
       });
+      archivosSubidos.push(pdfResult);
 
       actaSubida = {
-        url: pdfResult.secure_url,
-        public_id: pdfResult.public_id,
+        url: pdfResult.url,
+        public_id: pdfResult.publicId,
+        storageProvider: pdfResult.storageProvider,
+        storageKey: pdfResult.storageKey,
         nombre: textoBusqueda(pdfFile.originalname, 200),
         mimetype: pdfFile.mimetype || 'application/pdf',
         size: pdfFile.size || pdfFile.buffer.length,
         subidaEn: new Date()
       };
 
-      const anterior = store.acta;
-
+      actaAnterior = store.acta;
       store.acta = actaSubida;
-
-      if (anterior?.public_id && anterior.public_id !== actaSubida.public_id) {
-        await eliminarCloudinary(anterior.public_id, 'raw');
-      }
     }
-
-    const nuevasImagenes = [];
 
     for (let indice = 0; indice < imageFiles.length; indice += 1) {
       const file = imageFiles[indice];
       const imagen = await subirImagenActa(file, sesionId);
 
+      archivosSubidos.push(imagen);
+      imagenesNuevas.push(imagen);
       store.imagenes.push(imagen);
-      nuevasImagenes.push(imagen);
     }
 
     reordenarImagenes(store);
 
     const persistido = await guardarActaEnDb(sesionId);
 
+    if (
+      persistido &&
+      actaAnterior &&
+      actaAnterior.public_id !== actaSubida?.public_id
+    ) {
+      await eliminarArchivo(actaAnterior, 'raw');
+    }
+
+    const respuesta = await respuestaStore(store);
+    const idsNuevasImagenes = new Set(
+      imagenesNuevas.map((imagen) => imagen.storageKey || imagen.public_id)
+    );
+
     return res.json({
-      ...respuestaStore(store),
+      ...respuesta,
       mensaje: 'Carga y escaneo completados',
-      acta: actaSubida || store.acta,
-      imagenes: nuevasImagenes,
+      acta: respuesta.acta,
+      imagenes: respuesta.imagenes.filter((imagen) =>
+        idsNuevasImagenes.has(imagen.storageKey || imagen.public_id)
+      ),
       persistido
     });
   } catch (error) {
+    if (store) {
+      if (actaSubida && store.acta === actaSubida) {
+        store.acta = actaAnterior;
+      }
+
+      if (imagenesNuevas.length > 0) {
+        const idsNuevas = new Set(
+          imagenesNuevas.map((imagen) => imagen.storageKey || imagen.public_id)
+        );
+        store.imagenes = store.imagenes.filter(
+          (imagen) => !idsNuevas.has(imagen.storageKey || imagen.public_id)
+        );
+      }
+    }
+
+    await Promise.all(archivosSubidos.map((archivo) =>
+      eliminarArchivo(archivo, archivo.mimeType?.startsWith('image/') ? 'image' : 'raw')
+    ));
+
     console.error('Error subiendo acta/imágenes:', error);
 
     return res.status(error.status || 500).json({
@@ -676,11 +713,16 @@ router.post('/:sesionId/pagina', uploadPagina, async (req, res) => {
     reordenarImagenes(store);
 
     const persistido = await guardarActaEnDb(sesionId);
+    const respuesta = await respuestaStore(store);
+    const imagenFirmada = respuesta.imagenes.find((item) =>
+      (item.storageKey || item.public_id) ===
+      (imagen.storageKey || imagen.public_id)
+    );
 
     return res.status(201).json({
-      ...respuestaStore(store),
+      ...respuesta,
       mensaje: 'Página escaneada y agregada',
-      imagen,
+      imagen: imagenFirmada || null,
       persistido
     });
   } catch (error) {
@@ -712,17 +754,30 @@ router.get('/:sesionId/pdf', async (req, res) => {
 
     for (const imagen of store.imagenes) {
       try {
-        const buffer = await descargarBuffer(imagen.url);
+        const original = await descargarBuffer(imagen);
 
-        if (!buffer || buffer.length === 0) continue;
+        if (!original || original.length === 0) continue;
 
-        const metadata = await sharp(buffer, {
+        const pipeline = sharp(original, {
           limitInputPixels: LIMITE_PIXELES_ENTRADA,
           failOn: 'none'
-        }).metadata();
+        }).rotate();
+        const metadata = await pipeline.metadata();
 
         if (metadata.width && metadata.height) {
-          paginas.push(buffer);
+          paginas.push(await pipeline
+            .resize({
+              width: 2400,
+              height: 3000,
+              fit: 'inside',
+              withoutEnlargement: true
+            })
+            .jpeg({
+              quality: 85,
+              mozjpeg: true,
+              chromaSubsampling: '4:4:4'
+            })
+            .toBuffer());
         } else {
           console.warn('Una página del acta no tiene dimensiones válidas');
         }
@@ -893,7 +948,7 @@ router.patch('/:sesionId/orden', async (req, res) => {
     const persistido = await guardarActaEnDb(sesionId);
 
     return res.json({
-      ...respuestaStore(store),
+      ...await respuestaStore(store),
       mensaje: 'Orden de páginas actualizado',
       persistido
     });
@@ -934,7 +989,7 @@ router.get('/:sesionId', async (req, res) => {
       });
     }
 
-    return res.json(respuestaStore(store));
+    return res.json(await respuestaStore(store));
   } catch (error) {
     return res.status(error.status || 500).json({
       ok: false,
@@ -971,11 +1026,27 @@ router.delete('/:sesionId/item', async (req, res) => {
       });
     }
 
-    if (store.acta?.public_id === publicId) {
-      await eliminarCloudinary(publicId, 'raw');
+    if (
+      [store.acta?.public_id, store.acta?.storageKey, store.acta?.url]
+        .filter(Boolean)
+        .includes(publicId)
+    ) {
+      const eliminada = await eliminarArchivo(store.acta, 'raw');
+
+      if (!eliminada) {
+        return res.status(502).json({
+          ok: false,
+          mensaje: 'No se pudo eliminar el archivo del almacenamiento'
+        });
+      }
+
       store.acta = null;
     } else {
-      const indice = store.imagenes.findIndex((imagen) => imagen.public_id === publicId);
+      const indice = store.imagenes.findIndex((imagen) =>
+        [imagen.public_id, imagen.storageKey, imagen.url]
+          .filter(Boolean)
+          .includes(publicId)
+      );
 
       if (indice === -1) {
         return res.status(404).json({
@@ -984,7 +1055,15 @@ router.delete('/:sesionId/item', async (req, res) => {
         });
       }
 
-      await eliminarCloudinary(publicId, 'image');
+      const eliminada = await eliminarArchivo(store.imagenes[indice], 'image');
+
+      if (!eliminada) {
+        return res.status(502).json({
+          ok: false,
+          mensaje: 'No se pudo eliminar la página del almacenamiento'
+        });
+      }
+
       store.imagenes.splice(indice, 1);
       reordenarImagenes(store);
     }
@@ -992,7 +1071,7 @@ router.delete('/:sesionId/item', async (req, res) => {
     const persistido = await guardarActaEnDb(sesionId);
 
     return res.json({
-      ...respuestaStore(store),
+      ...await respuestaStore(store),
       mensaje: 'Archivo eliminado',
       persistido
     });
@@ -1025,26 +1104,51 @@ router.delete('/:sesionId', async (req, res) => {
       imagenes: 0
     };
 
-    if (store?.acta?.public_id) {
-      eliminados.actaPdf = await eliminarCloudinary(store.acta.public_id, 'raw');
+    let todosEliminados = true;
+
+    if (
+      store?.acta &&
+      (store.acta.public_id || store.acta.storageKey || store.acta.url)
+    ) {
+      eliminados.actaPdf = await eliminarArchivo(store.acta, 'raw');
+      todosEliminados = todosEliminados && eliminados.actaPdf;
+      if (eliminados.actaPdf) store.acta = null;
     }
 
     if (Array.isArray(store?.imagenes)) {
-      for (const imagen of store.imagenes) {
-        if (!imagen?.public_id) continue;
+      const restantes = [];
 
-        const eliminada = await eliminarCloudinary(imagen.public_id, 'image');
+      for (const imagen of store.imagenes) {
+        if (!imagen?.public_id && !imagen?.storageKey && !imagen?.url) {
+          todosEliminados = false;
+          restantes.push(imagen);
+          continue;
+        }
+
+        const eliminada = await eliminarArchivo(imagen, 'image');
 
         if (eliminada) eliminados.imagenes += 1;
+        else {
+          todosEliminados = false;
+          restantes.push(imagen);
+        }
       }
+
+      store.imagenes = restantes;
     }
 
-    delete actasEnMemoria[sesionId];
-    await eliminarActaEnDb(sesionId);
+    if (todosEliminados) {
+      delete actasEnMemoria[sesionId];
+      await eliminarActaEnDb(sesionId);
+    } else if (store) {
+      await guardarActaEnDb(sesionId);
+    }
 
     return res.json({
-      ok: true,
-      mensaje: 'Acta e imágenes eliminadas',
+      ok: todosEliminados,
+      mensaje: todosEliminados
+        ? 'Acta e imágenes eliminadas'
+        : 'Algunos archivos no se pudieron eliminar; se conservaron sus referencias',
       eliminados
     });
   } catch (error) {
